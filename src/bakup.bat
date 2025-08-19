@@ -1,0 +1,2 @@
+Rem robocopy "원본 경로" "대상 경로" /E
+robocopy "c:\Users\ohbok\Taipy\sparc-malfunction-classification-develop\src" "c:\Users\ohbok\Taipy\sparc-malfunction-classification-develop_bak\src" /E /XD ".taipy" ".tmp" ".venv" "__pycache__" "data" "user_data"

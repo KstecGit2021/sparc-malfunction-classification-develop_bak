@@ -1,0 +1,11 @@
+taipy==4.0.2
+scikit-learn==1.6.1
+statsmodels==0.14.4
+plotly==5.24.1
+scikit-learn  # For models like Logistic Regression, Random Forest
+xgboost       # For XGBoost model
+matplotlib    # For SHAP plots
+shap          # For SHAP plots
+optuna
+imbalanced-learn
+ipywidgets

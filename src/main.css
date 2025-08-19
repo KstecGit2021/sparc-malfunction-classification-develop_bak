@@ -1,0 +1,88 @@
+.red_color td{
+    background-color: rgb(255, 155, 155) !important;
+}
+.green_color td{
+    background-color: rgb(171, 255, 171) !important;
+}
+
+
+strong, b {
+    font-weight: bold; /* This is equivalent to 700 */
+    color: #ff6049;
+}
+
+.css-179jfzq .sidebar{
+    height: auto;
+}
+
+.content{
+    margin-left: 5%;
+    margin-right: 5%;
+}
+
+.header.sticky{
+    overflow:auto;
+    z-index: 2;
+}
+
+.header-content{
+    margin-left: 2%;
+    margin-right: 7%;
+}
+
+.header .MuiButtonBase-root.MuiTab-root{
+    border: 1px solid var(--color-primary); /* Thin line with 1px width, change color as needed */
+    border-radius: 25px; /* Adjust this value for more or less rounding */
+    padding: 10px; /* Optional: adds padding inside the rounded border */
+    margin: 10px;
+    text-transform: none;
+    width: 12%;
+}
+
+.header .MuiButtonBase-root.MuiTab-root.Mui-selected{
+    background-color: var(--color-primary);
+    color: white;
+}
+
+
+.css-6fy833 p{
+    opacity: 0;
+}
+
+
+
+.css-6fy833 .MuiToggleButtonGroup-root{
+    top: 0.1rem !important;
+    right: 0.5rem ! important;
+    position: fixed;
+}
+
+.taipy-chart{
+    margin:5px;
+}
+
+.taipy-toggle .MuiToggleButtonGroup-root{
+    height: 45px;
+    min-height: 45px;
+}
+
+.taipy-toggle .Mui-selected{
+    background-color: var(--color-primary);
+    color:white;
+    height: 45px;
+    min-height: 45px;
+}
+
+.taipy-toggle .Mui-selected .MuiTypography-root{
+    color:white !important;
+}
+
+/* Toggle Text */
+.taipy-toggle .MuiTypography-root{
+    color: var(--color-primary);
+}
+
+/* Toggle Text Selected */
+.taipy-toggle .Mui-selected .MuiTypography-root{
+    color: var(--color-primary);
+}
