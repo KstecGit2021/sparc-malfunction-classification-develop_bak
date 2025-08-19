@@ -1,0 +1,785 @@
+@@R000
+
+
+
+https://hyunicecream.tistory.com/75#1.%20Optuna%EB%9E%80%20%EB%AC%B4%EC%97%87%EC%9D%B8%EA%B0%80%3F-1
+https://gzerosa.tistory.com/35
+
+@@Q000
+
+아래 함수에 대하여 다음 사항 반영해줘.
+
+- dic 형식의 algo_parameter_set 를 입력으로 추가로 받아서 각 파라미터를 설정
+    . algo_parameter_set 에 알고리즘 이름 반영
+    . 알고리즘 명이 train_model_xgboost_cv 와 같은 경우 파라미터를 맞추어 지정
+- 파리미터 설정이 완료되면 dic 형식의 algo_parameter_info 변수에 저장하고 기존 리턴에 추가로 리턴
+
+def train_model_xgboost_cv(train_dataset: pd.DataFrame, feature_selection_info: dict):
+    print(
+        "      Training the XGBoost model with cross-validation & hyperparameter tuning...\n"
+    )
+
+    X, y = train_dataset.iloc[:, :-1], train_dataset.iloc[:, -1]
+
+    # # 'final_features.json' 파일에서 최종 특징 리스트를 불러와서 X를 재구성합니다.
+    # with open("final_features.json", "r") as f:
+    #     final_features = json.load(f)
+    final_features = feature_selection_info['final_features']
+    X = X[final_features]
+
+    # 탐색할 하이퍼파라미터 그리드를 정의합니다.
+    param_grid = {
+        "n_estimators": [30, 50, 100, 200], # 부스팅 라운드의 수
+        "max_depth": [2, 5], # 트리의 최대 깊이
+        "learning_rate": [0.01, 0.1, 0.2], # 학습률
+    }
+
+    # 클래스 불균형을 위한 'scale_pos_weight'를 계산합니다.
+    # 양성(positive) 클래스(1)의 개수 대비 음성(negative) 클래스(0)의 개수 비율에 2를 곱해줍니다.
+    n_pos = sum(y) # 양성 클래스(1)의 개수
+    n_neg = len(y) - n_pos # 음성 클래스(0)의 개수
+    scale_pos_weight = n_neg / n_pos * 2 if n_pos > 0 else 1
+
+    # XGBoost 모델 객체를 생성합니다.
+    xgb_model = XGBClassifier(
+        use_label_encoder=False, # 경고 메시지를 피하기 위한 설정
+        eval_metric="logloss", # 평가 지표 설정
+        random_state=42,
+        scale_pos_weight=scale_pos_weight, # 클래스 불균형을 위한 가중치
+    )
+
+    # GridSearchCV를 설정합니다. F2 스코어를 사용하여 최적의 모델을 찾습니다.
+    grid_search = GridSearchCV(
+        estimator=xgb_model,
+        param_grid=param_grid,
+        scoring=f2_rare_scorer,  # F2 스코어 (클래스 1에 대한)
+        cv=3,
+        verbose=1,
+        n_jobs=-1,
+    )
+
+    grid_search.fit(X, y)
+    best_model = grid_search.best_estimator_
+
+    print(f"\n    Best parameters found: {grid_search.best_params_}")
+    print(f"    Best F2 (class=1) score: {grid_search.best_score_:.4f}\n")
+
+    # 최적 모델의 특징 중요도를 계산합니다.
+    importance_dict = {
+        "Features": X.columns,
+        "Importance": best_model.feature_importances_,
+        "Importance_abs": np.abs(best_model.feature_importances_),
+    }
+    importance = pd.DataFrame(importance_dict).sort_values(
+        by="Importance", ascending=True
+    )
+    return best_model, importance
+
+
+
+@@Q001
+
+import optuna
+
+# LightGBM을 위한 목적 함수 정의
+def objective(trial):
+    params = {
+        'num_leaves': trial.suggest_int('num_leaves', 20, 40),
+        'n_estimators': trial.suggest_int('n_estimators', 100, 200),
+        'min_child_weight': trial.suggest_int('min_child_weight', 5, 20),
+        'max_depth': trial.suggest_int('max_depth', 10, 30),
+        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.1),
+        'colsample_bytree': trial.suggest_float('colsample_bytree', 0.4, 0.8),
+        'random_state': 42,
+        'force_row_wise': True,
+        'verbose': -1 
+    }
+    model = LGBMRegressor(**params)
+
+    model.fit(X_train, y_train, eval_set=[(X_val, y_val)],)
+    y_pred = model.predict(X_val)
+    return rmse(y_val, y_pred)
+    
+# Optuna 스터디 생성 및 최적화 실행
+# minimize(최소 값) 모델 평가 방법에 따라 변경 maximizer(최대 값)
+study = optuna.create_study(direction='minimize')
+# 시도 횟수 n_trials = 50번 
+study.optimize(objective, n_trials=50)
+
+print(f"모델 이름: 최적의 값 = {study.best_value}, 최적의 파라미터 = {study.best_params}")
+# 최적의 파라미터와 RMSE 출력
+print("Best trial:")
+trial = study.best_trial
+
+print("Value: ", trial.value)
+print("Params: ")
+for key, value in trial.params.items():
+    print(f"{key}: {value}")
+
+
+@! 위의 optuna 사용 로직을 참고하여 아래 로직에서 train_model_*_cv 함수들에 대하여 optuna 를 활용 train_model_*_optuna 함수형태로 함수들을 추가로 생성 그리고 train_model_*_optuna 함수의 params 은 빠른 수행속도가 되도록 적당하게 조정해서 작성해줘.
+
+
+##############################################################################################################################
+# 5) Logistic Regression (simple) - Now up-weight class 1
+# 5) 로지스틱 회귀 (단순) - 이제 클래스 1에 가중치를 부여합니다.
+##############################################################################################################################
+
+# 로지스틱 회귀 모델을 훈련하는 함수
+def train_model_logistic_regression(train_dataset: pd.DataFrame, feature_selection_info: dict, train_parameters: dict = None):
+    print("      Training Logistic Regression (no CV)...\n")
+    
+    model_parameter_info = {}
+
+    X, y = train_dataset.iloc[:, :-1], train_dataset.iloc[:, -1]
+    final_features = feature_selection_info['final_features']
+    X = X[final_features]
+
+    # train_parameters에 따라 파라미터 설정
+    if train_parameters and train_parameters.get('function_name') == 'train_model_logistic_regression':
+        solver = train_parameters.get('solver', 'lbfgs')
+        max_iter = train_parameters.get('max_iter', 1000)
+    else:
+        solver = 'lbfgs'
+        max_iter = 1000
+    
+    # 설정된 파라미터 정보 저장
+    model_parameter_info['solver'] = solver
+    model_parameter_info['max_iter'] = max_iter
+
+    # 클래스 불균형 해결을 위한 클래스 가중치 설정
+    n_pos = sum(y)
+    n_neg = len(y) - n_pos
+
+    # 값이 None이거나 딕셔너리에 키가 없으면 n_neg로 설정
+    if train_parameters.get('class_weight_multiplier') == '':
+        class_weight_multiplier = n_neg
+    else:
+        class_weight_multiplier = eval(train_parameters.get('class_weight_multiplier'))
+        
+    class_weight = {0: 1, 1: class_weight_multiplier}
+
+    model_parameter_info['class_weight_multiplier'] = train_parameters.get('class_weight_multiplier')    
+    model_fitted = LogisticRegression(
+        class_weight=class_weight,
+        solver=solver,
+        max_iter=max_iter
+    ).fit(X, y)
+    
+    print("\n    LogisticRegression is trained!")
+
+    importance_dict = {
+        "Features": X.columns,
+        "Importance": model_fitted.coef_[0],
+        "Importance_abs": np.abs(model_fitted.coef_[0]),
+    }
+    importance = pd.DataFrame(importance_dict).sort_values(
+        by="Importance", ascending=True
+    )
+    
+    return model_fitted, importance, model_parameter_info
+
+
+##############################################################################################################################
+# 5a) Logistic Regression with CV + F2 scoring
+# 5a) 교차 검증(CV) 및 F2 스코어링을 사용한 로지스틱 회귀
+##############################################################################################################################
+def train_model_logistic_regression_cv(train_dataset: pd.DataFrame, feature_selection_info: dict, train_parameters: dict = None):
+    print("      Training Logistic Regression with cross-validation & hyperparameter tuning...\n")
+    
+    model_parameter_info = {}
+    
+    X, y = train_dataset.iloc[:, :-1], train_dataset.iloc[:, -1]
+    final_features = feature_selection_info['final_features']
+    X = X[final_features]
+
+    # train_parameters에 따라 파라미터 그리드 및 GridSearchCV 파라미터 설정
+    if train_parameters and train_parameters.get('function_name') == 'train_model_logistic_regression_cv':
+        param_grid = train_parameters.get('param_grid', {})
+        cv = train_parameters.get('cv', 3)
+        verbose = train_parameters.get('verbose', 1)
+
+        # f2_rare_scorer 설정 로직 반영
+        scoring_params = train_parameters.get('f2_rare_scorer', {})
+        if scoring_params.get('name') == 'fbeta_score':
+            beta = scoring_params.get('beta', 2)
+            pos_label = scoring_params.get('pos_label', 1)
+            scorer = make_scorer(fbeta_score, beta=beta, pos_label=pos_label)
+        else:
+            scorer = make_scorer(f2_rare_scorer, greater_is_better=True)
+    else:
+        # 기본 하이퍼파라미터 설정
+        param_grid = {"C": [0.01, 0.1, 1], "penalty": ["l2"], "solver": ["lbfgs"]}
+        cv = 3
+        verbose = 1
+        scorer = make_scorer(f2_rare_scorer, greater_is_better=True)
+
+    # 설정된 파라미터 정보 저장
+    model_parameter_info['param_grid'] = param_grid
+    model_parameter_info['cv'] = cv
+    model_parameter_info['verbose'] = verbose
+    if 'scorer' in locals():
+        model_parameter_info['f2_rare_scorer'] = {
+            'name': 'fbeta_score',
+            'beta': scorer._kwargs.get('beta'),
+            'pos_label': scorer._kwargs.get('pos_label')
+        }
+
+    # 클래스 불균형 문제를 해결하기 위해 클래스 가중치 부여
+    n_neg = len(y) - sum(y)
+    class_weight_multiplier = train_parameters.get('class_weight_multiplier', n_neg) if train_parameters else n_neg
+    class_weight = {0: 1, 1: class_weight_multiplier}
+    
+    model_parameter_info['class_weight_multiplier'] = class_weight_multiplier
+
+    lr = LogisticRegression(class_weight=class_weight, max_iter=1000, random_state=42)
+
+    grid_search = GridSearchCV(
+        estimator=lr,
+        param_grid=param_grid,
+        scoring=scorer,
+        cv=cv,
+        verbose=verbose,
+        n_jobs=-1,
+    )
+
+    grid_search.fit(X, y)
+    best_model = grid_search.best_estimator_
+
+    print(f"\n    Best parameters found: {grid_search.best_params_}")
+    print(f"    Best F2 (class=1) score (CV): {grid_search.best_score_:.4f}\n")
+    
+    model_parameter_info['best_params'] = grid_search.best_params_
+
+    importance_dict = {
+        "Features": X.columns,
+        "Importance": best_model.coef_[0],
+        "Importance_abs": np.abs(best_model.coef_[0]),
+    }
+    importance = pd.DataFrame(importance_dict).sort_values(
+        by="Importance", ascending=True
+    )
+
+    return best_model, importance, model_parameter_info    
+
+
+
+##############################################################################################################################
+# 7a) RandomForest with CV & GridSearch using F2 on class=1
+# 7a) 클래스 1에 대한 F2를 사용한 교차 검증 및 그리드 서치를 이용한 랜덤 포레스트
+##############################################################################################################################
+
+# 교차 검증 및 하이퍼파라미터 튜닝을 통해 랜덤 포레스트 모델을 훈련하는 함수
+def train_model_rf_cv(train_dataset: pd.DataFrame, feature_selection_info: dict, train_parameters: dict = None):
+    print("      Training the Random Forest model with cross-validation & hyperparameter tuning...\n")
+    
+    model_parameter_info = {}
+    
+    X, y = train_dataset.iloc[:, :-1], train_dataset.iloc[:, -1]
+    final_features = feature_selection_info['final_features']
+    X = X[final_features]
+
+    # train_parameters에 따라 파라미터 그리드 및 GridSearchCV 파라미터 설정
+    if train_parameters and train_parameters.get('function_name') == 'train_model_rf_cv':
+        param_grid = train_parameters.get('param_grid', {})
+        cv = train_parameters.get('cv', 3)
+        verbose = train_parameters.get('verbose', 1)
+        
+        # f2_rare_scorer 설정 로직 반영
+        scoring_params = train_parameters.get('f2_rare_scorer', {})
+        if scoring_params.get('name') == 'fbeta_score':
+            beta = scoring_params.get('beta', 2)
+            pos_label = scoring_params.get('pos_label', 1)
+            scorer = make_scorer(fbeta_score, beta=beta, pos_label=pos_label)
+        else:
+            scorer = make_scorer(f2_rare_scorer, greater_is_better=True)
+            
+    else:
+        param_grid = {
+            "n_estimators": [20, 50, 100],
+            "max_depth": [2, 5, None],
+            "min_samples_split": [2, 5],
+        }
+        cv = 3
+        verbose = 1
+        scorer = make_scorer(f2_rare_scorer, greater_is_better=True)
+    
+    # 설정된 파라미터 정보 저장
+    model_parameter_info['param_grid'] = param_grid
+    model_parameter_info['cv'] = cv
+    model_parameter_info['verbose'] = verbose
+    if 'f2_rare_scorer' in locals():
+        model_parameter_info['f2_rare_scorer'] = {
+            'name': 'fbeta_score',
+            'beta': scorer._kwargs.get('beta'),
+            'pos_label': scorer._kwargs.get('pos_label')
+        }
+
+    # 클래스 불균형 문제를 해결하기 위해 클래스 가중치 부여
+    n_neg = len(y) - sum(y)
+
+    # 값이 None이거나 딕셔너리에 키가 없으면 n_neg로 설정
+    if train_parameters.get('class_weight_multiplier') == '':
+        class_weight_multiplier = n_neg
+    else:
+        class_weight_multiplier = eval(train_parameters.get('class_weight_multiplier'))
+        
+    class_weight = {0: 1, 1: class_weight_multiplier}
+
+    model_parameter_info['class_weight_multiplier'] = train_parameters.get('class_weight_multiplier')    
+   
+    rf_model = RandomForestClassifier(class_weight=class_weight, random_state=42)
+
+    grid_search = GridSearchCV(
+        estimator=rf_model,
+        param_grid=param_grid,
+        scoring=scorer,
+        cv=cv,
+        verbose=verbose,
+        n_jobs=-1,
+    )
+
+    grid_search.fit(X, y)
+    best_model = grid_search.best_estimator_
+
+    print(f"\n    Best parameters found: {grid_search.best_params_}")
+    print(f"    Best F2 (class=1) score (CV): {grid_search.best_score_:.4f}\n")
+    
+    model_parameter_info['best_params'] = grid_search.best_params_
+
+    importance_dict = {
+        "Features": X.columns,
+        "Importance": best_model.feature_importances_,
+        "Importance_abs": np.abs(best_model.feature_importances_),
+    }
+    importance = pd.DataFrame(importance_dict).sort_values(
+        by="Importance", ascending=True
+    )
+    
+    return best_model, importance, model_parameter_info
+
+##############################################################################################################################
+# 8) Decision Tree
+# 8) 의사결정나무
+##############################################################################################################################
+
+# 의사결정나무 모델을 훈련하는 함수
+def train_model_decision_tree(train_dataset: pd.DataFrame, feature_selection_info: dict, train_parameters: dict = None):
+    X, y = train_dataset.iloc[:, :-1], train_dataset.iloc[:, -1]
+    final_features = feature_selection_info['final_features']
+    X = X[final_features]
+    
+    model_parameter_info = {}
+
+    # train_parameters에 따라 파라미터 설정
+    if train_parameters and train_parameters.get('function_name') == 'train_model_decision_tree':
+        max_depth = train_parameters.get('max_depth', None)
+        min_samples_split = train_parameters.get('min_samples_split', 2)
+    else:
+        max_depth = None
+        min_samples_split = 2
+        
+    # 설정된 파라미터 정보 저장
+    model_parameter_info['max_depth'] = max_depth
+    model_parameter_info['min_samples_split'] = min_samples_split
+
+    # 클래스 불균형 해결을 위한 클래스 가중치 설정
+    n_neg = len(y) - sum(y)
+    class_weight_multiplier = train_parameters.get('class_weight_multiplier', n_neg) if train_parameters else n_neg
+    class_weight = {0: 1, 1: class_weight_multiplier}
+    
+    model_parameter_info['class_weight_multiplier'] = class_weight_multiplier
+    
+    model_fitted = DecisionTreeClassifier(
+        class_weight=class_weight,
+        max_depth=max_depth,
+        min_samples_split=min_samples_split,
+        random_state=42
+    ).fit(X, y)
+    
+    print("\n    DecisionTreeClassifier is trained!")
+
+    importance_dict = {
+        "Features": X.columns,
+        "Importance": model_fitted.feature_importances_,
+        "Importance_abs": np.abs(model_fitted.feature_importances_),
+    }
+    importance = pd.DataFrame(importance_dict).sort_values(
+        by="Importance", ascending=True
+    )
+    
+    return model_fitted, importance, model_parameter_info    
+
+##############################################################################################################################
+# 9) XGBoost with CV & F2 on class=1
+# 9) 클래스 1에 대한 F2를 사용한 교차 검증 XGBoost
+##############################################################################################################################
+
+# 교차 검증 및 하이퍼파라미터 튜닝을 통해 XGBoost 모델을 훈련하는 함수
+def train_model_xgboost_cv(train_dataset: pd.DataFrame, feature_selection_info: dict, train_parameters: dict = None):
+    print(
+        "    Training the XGBoost model with cross-validation & hyperparameter tuning...\n"
+    )
+
+    model_parameter_info = {}
+
+    X, y = train_dataset.iloc[:, :-1], train_dataset.iloc[:, -1]
+
+    final_features = feature_selection_info['final_features']
+    X = X[final_features]
+
+    # train_parameters에서 알고리즘 이름에 따라 파라미터 설정
+    if train_parameters and train_parameters.get('function_name') == 'train_model_xgboost_cv':
+        param_grid = train_parameters.get('param_grid', {})
+        scale_pos_weight_multiplier = train_parameters.get('scale_pos_weight_multiplier', 2)
+        cv = train_parameters.get('cv', 3)
+        verbose = train_parameters.get('verbose', 1)
+        
+        # f2_rare_scorer 설정 로직 반영
+        scoring_params = train_parameters.get('f2_rare_scorer', {})
+        if scoring_params.get('name') == 'fbeta_score':
+            beta = scoring_params.get('beta', 2)
+            pos_label = scoring_params.get('pos_label', 1)
+            f2_rare_scorer = make_scorer(fbeta_score, beta=beta, pos_label=pos_label)
+        else:
+            # 기본 F2 스코어
+            f2_rare_scorer = make_scorer(lambda y_true, y_pred: fbeta_score(y_true, y_pred, beta=2, pos_label=1))
+            
+    else:
+        # 기본 하이퍼파라미터 설정
+        param_grid = {
+            "n_estimators": [30, 50, 100, 200],
+            "max_depth": [2, 5],
+            "learning_rate": [0.01, 0.1, 0.2],
+        }
+        scale_pos_weight_multiplier = 2
+        cv = 3
+        verbose = 1
+        f2_rare_scorer = make_scorer(lambda y_true, y_pred: fbeta_score(y_true, y_pred, beta=2, pos_label=1))
+
+    # 설정된 파라미터 정보를 저장합니다.
+    model_parameter_info['param_grid'] = param_grid
+    model_parameter_info['scale_pos_weight_multiplier'] = scale_pos_weight_multiplier
+    model_parameter_info['cv'] = cv
+    model_parameter_info['verbose'] = verbose
+    model_parameter_info['f2_rare_scorer'] = {
+        'name': 'fbeta_score',
+        'beta': f2_rare_scorer._kwargs.get('beta'),
+        'pos_label': f2_rare_scorer._kwargs.get('pos_label')
+    }
+
+    # 클래스 불균형을 위한 'scale_pos_weight'를 계산합니다.
+    n_pos = sum(y)
+    n_neg = len(y) - n_pos
+    scale_pos_weight = n_neg / n_pos * scale_pos_weight_multiplier if n_pos > 0 else 1
+
+    # XGBoost 모델 객체를 생성합니다.
+    xgb_model = XGBClassifier(
+        use_label_encoder=False,
+        eval_metric="logloss",
+        random_state=42,
+        scale_pos_weight=scale_pos_weight,
+    )
+
+    # GridSearchCV를 설정합니다.
+    grid_search = GridSearchCV(
+        estimator=xgb_model,
+        param_grid=param_grid,
+        scoring=f2_rare_scorer,
+        cv=cv,
+        verbose=verbose,
+        n_jobs=-1,
+    )
+
+    grid_search.fit(X, y)
+    best_model = grid_search.best_estimator_
+
+    print(f"\n    Best parameters found: {grid_search.best_params_}")
+    print(f"    Best F2 (class=1) score: {grid_search.best_score_:.4f}\n")
+    
+    model_parameter_info['best_params'] = grid_search.best_params_
+
+    # 최적 모델의 특징 중요도를 계산합니다.
+    importance_dict = {
+        "Features": X.columns,
+        "Importance": best_model.feature_importances_,
+        "Importance_abs": np.abs(best_model.feature_importances_),
+    }
+    importance = pd.DataFrame(importance_dict).sort_values(
+        by="Importance", ascending=True
+    )
+
+    return best_model, importance, model_parameter_info
+
+
+
+
+
+@@Q002
+
+train_parameters_list_default = {
+'baseline': {'Parameters': {'function_name': 'train_model_baseline',
+                             'importance_data': {'Features': ['SensorOffsetHot-Cold',
+                                                              'band gap '
+                                                              'dpat_ok for '
+                                                              'band gap',
+                                                              'Radius'],
+                                                 'Importance': [56.6,
+                                                                4.65,
+                                                                96.9]}}},
+ 'logistic_regression': {'Parameters': {'class_weight_multiplier': 'len(y) - '
+                                                                   'n_pos',
+                                        'function_name': 'train_model_logistic_regression',
+                                        'max_iter': 1000,
+                                        'solver': 'lbfgs'}},
+ 'random_forest': {'Parameters': {'class_weight_multiplier': 'len(y) - sum(y)',
+                                  'cv': 3,
+                                  'f2_rare_scorer': {'beta': 2,
+                                                     'name': 'fbeta_score',
+                                                     'pos_label': 1},
+                                  'function_name': 'train_model_rf_cv',
+                                  'param_grid': {'max_depth': [2, 5, None],
+                                                 'min_samples_split': [2, 5],
+                                                 'n_estimators': [20, 50, 100]},
+                                  'verbose': 1}},
+ 'xgboost': {'Parameters': {'cv': 3,
+                            'f2_rare_scorer': {'beta': 2,
+                                               'name': 'fbeta_score',
+                                               'pos_label': 1},
+                            'function_name': 'train_model_xgboost_cv',
+                            'param_grid': {'learning_rate': [0.01, 0.1, 0.2],
+                                           'max_depth': [2, 5],
+                                           'n_estimators': [30, 50, 100]},
+                            'scale_pos_weight_multiplier': 2,
+                            'verbose': 1}}
+ }
+ 
+ 
+ 
+ train_parameters = \
+ {'class_weight_multiplier': 'len(y) - n_pos',
+ 'function_name': 'train_model_logistic_regression',
+ 'max_iter': 1000,
+ 'solver': 'lbfgs'}
+ 
+ 
+ # 로지스틱 회귀 모델을 훈련하는 함수
+def train_model_logistic_regression(train_dataset: pd.DataFrame, feature_selection_info: dict, train_parameters: dict = None):
+    print("      Training Logistic Regression (no CV)...\n")
+    
+    model_parameter_info = {}
+
+    X, y = train_dataset.iloc[:, :-1], train_dataset.iloc[:, -1]
+    final_features = feature_selection_info['final_features']
+    X = X[final_features]
+
+    # train_parameters에 따라 파라미터 설정
+    if train_parameters and train_parameters.get('function_name') == 'train_model_logistic_regression':
+        solver = train_parameters.get('solver', 'lbfgs')
+        max_iter = train_parameters.get('max_iter', 1000)
+    else:
+        solver = 'lbfgs'
+        max_iter = 1000
+    
+    # 설정된 파라미터 정보 저장
+    model_parameter_info['solver'] = solver
+    model_parameter_info['max_iter'] = max_iter
+
+    # 클래스 불균형 해결을 위한 클래스 가중치 설정
+    n_pos = sum(y)
+    n_neg = len(y) - n_pos
+
+    # 값이 None이거나 딕셔너리에 키가 없으면 n_neg로 설정
+    if train_parameters.get('class_weight_multiplier') == '':
+        class_weight_multiplier = n_neg
+    else:
+        class_weight_multiplier = eval(train_parameters.get('class_weight_multiplier'))
+        
+    class_weight = {0: 1, 1: class_weight_multiplier}
+
+    model_parameter_info['class_weight_multiplier'] = train_parameters.get('class_weight_multiplier')    
+    model_fitted = LogisticRegression(
+        class_weight=class_weight,
+        solver=solver,
+        max_iter=max_iter
+    ).fit(X, y)
+    
+    print("\n    LogisticRegression is trained!")
+
+    importance_dict = {
+        "Features": X.columns,
+        "Importance": model_fitted.coef_[0],
+        "Importance_abs": np.abs(model_fitted.coef_[0]),
+    }
+    importance = pd.DataFrame(importance_dict).sort_values(
+        by="Importance", ascending=True
+    )
+    
+    return model_fitted, importance, model_parameter_info
+
+
+@! 위 함수를 참고하여 아래 함수에 train_parameters 입력을 함수에 반영하되 train_parameters 구성을 보다 적합하게 보완해서 반영해줘.
+
+##############################################################################################################################
+# Optuna를 사용하여 최적화하는 로지스틱 회귀 모델 훈련 함수
+##############################################################################################################################
+def train_model_logistic_regression_optuna(train_dataset: pd.DataFrame, feature_selection_info: dict):
+    print("      Training Logistic Regression with Optuna hyperparameter tuning...\n")
+    
+    model_parameter_info = {}
+    
+    X, y = train_dataset.iloc[:, :-1], train_dataset.iloc[:, -1]
+    final_features = feature_selection_info['final_features']
+    X = X[final_features]
+    
+    n_neg = len(y) - sum(y)
+
+    def objective(trial):
+        # Optuna를 위한 파라미터 탐색 범위 설정 (빠른 수행 속도에 적합하게 조정)
+        params = {
+            'C': trial.suggest_float('C', 1e-3, 10, log=True),
+            'solver': trial.suggest_categorical('solver', ['liblinear', 'lbfgs']),
+            # 클래스 가중치 승수 탐색
+            'class_weight_multiplier': trial.suggest_int('class_weight_multiplier', 1, n_neg)
+        }
+        
+        class_weight = {0: 1, 1: params.pop('class_weight_multiplier')}
+        
+        lr = LogisticRegression(
+            class_weight=class_weight,
+            max_iter=1000,
+            random_state=42,
+            **params
+        )
+
+        # StratifiedKFold를 사용한 교차 검증으로 F2 스코어 계산
+        kf = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+        score = cross_val_score(lr, X, y, cv=kf, scoring=f2_rare_scorer, n_jobs=-1).mean()
+        
+        return score
+    
+    # F2 score를 최대화하는 방향으로 스터디 생성
+    study = optuna.create_study(direction='maximize')
+    # 빠른 수행을 위해 시도 횟수(n_trials)를 30회로 설정
+    study.optimize(objective, n_trials=30, show_progress_bar=True)
+    
+    best_params = study.best_params
+    best_class_weight_multiplier = best_params.pop('class_weight_multiplier')
+    best_class_weight = {0: 1, 1: best_class_weight_multiplier}
+    
+    best_model = LogisticRegression(
+        class_weight=best_class_weight,
+        max_iter=1000,
+        random_state=42,
+        **best_params
+    ).fit(X, y)
+
+    print(f"\n    Best parameters found (Optuna): {study.best_params}")
+    print(f"    Best F2 (class=1) score (CV): {study.best_value:.4f}\n")
+    
+    model_parameter_info['best_params'] = study.best_params
+    
+    importance_dict = {
+        "Features": X.columns,
+        "Importance": best_model.coef_[0],
+        "Importance_abs": np.abs(best_model.coef_[0]),
+    }
+    importance = pd.DataFrame(importance_dict).sort_values(
+        by="Importance", ascending=True
+    )
+    
+    return best_model, importance, model_parameter_info
+
+
+
+@! 위 답변한 train_model_rf_optuna 함수에 적합한 샘플 train_parameters dic 작성
+
+train_parameters = {
+    'function_name': 'train_model_rf_optuna',
+    'n_trials': 50,  # Optuna가 시도할 하이퍼파라미터 조합의 수
+    'cv': 5,         # 교차 검증 폴드 수
+    'param_ranges': {
+        'n_estimators': {'low': 100, 'high': 300},
+        'max_depth': {'low': 10, 'high': 30},
+        'min_samples_split': {'low': 2, 'high': 20},
+        'min_samples_leaf': {'low': 1, 'high': 10},
+        'max_features': {'choices': ['sqrt', 0.5, 0.8]},
+        # 'class_weight_multiplier'의 'high' 값은 데이터셋의 클래스 불균형에 따라 동적으로 결정됨
+    }
+}
+
+
+
+@@Q003
+
+다음의 create_train_test_data 함수에 오버/언더 샘플링을 적용하되 다음의 요건을 반영. 그리고 함수의 입출력 파라이터 샘플의 정의 및 예시에 모든 파라미터가 포함되도록 하여 답변.
+
+- y=1 이 target_minority 적용.
+- 오버/언더 샘플링 및 함수상에 적용 관련 파라이터 정보를 split_parameters dic 형태로 모두 받아서 반영.
+- 오버/언더 샘플링을 미적용 및 오버/언더를 구분하지 말고 적용비율에 따라 오버/언더 비율을 auto 또는 세부적으로 조정할 수 있게 파라이터에 관련 정보를 적용.
+
+- 오버/언더 샘플링을 포함 함수상에 파라미터로 설정된 모든 정보를 split_parameter_info dic 변수에 저장하여 리턴
+
+
+# 분산 및 상관관계 필터를 적용하는 함수입니다.
+def variance_correlation_filter(
+    X: pd.DataFrame, var_threshold=0.0, corr_threshold=0.98
+):
+    """
+    1) 분산이 var_threshold 이하인 특징을 제거합니다.
+    2) 절대 상관관계가 corr_threshold를 초과하는 특징 쌍 중 하나를 제거합니다.
+    반환값:
+      (필터링된 X_filtered, 최종 컬럼 리스트 final_cols)
+    """
+    # 분산 임계값(VarianceThreshold)을 사용하여 분산이 0 이하인 컬럼을 제거합니다.
+    vt = VarianceThreshold(threshold=var_threshold)
+    X_vt = vt.fit_transform(X) # 데이터를 변환
+    vt_mask = vt.get_support() # 제거되지 않고 남은 컬럼의 마스크를 가져옴
+    vt_cols = X.columns[vt_mask] # 남은 컬럼 이름들을 가져옴
+    print("Number of features kept after Variance threshold", sum(vt_mask))
+
+    # 필터링된 데이터로 새로운 데이터프레임을 만듭니다.
+    X_vt_df = pd.DataFrame(X_vt, columns=vt_cols)
+
+    # 상관관계 행렬을 계산하고, 절대값으로 변환합니다.
+    corr_matrix = X_vt_df.corr().abs()
+    # 상관관계 행렬의 위쪽 삼각형 부분만 선택합니다 (중복 방지).
+    upper = corr_matrix.where(np.triu(np.ones_like(corr_matrix, dtype=bool), k=1))
+    # 상관관계가 임계값(0.98)보다 높은 컬럼들을 찾아서 제거할 리스트에 담습니다.
+    to_drop = [col for col in upper.columns if any(upper[col] > corr_threshold)]
+    # 해당 컬럼들을 데이터프레임에서 제거합니다.
+    X_filtered = X_vt_df.drop(to_drop, axis=1)
+    # 최종적으로 남은 컬럼 리스트를 저장합니다.
+    final_cols = list(X_filtered.columns)
+
+    return X_filtered, final_cols
+
+##############################################################################################################################
+# 3) Create Train/Test Split
+# 3) 훈련/테스트 데이터 분할
+##############################################################################################################################
+
+# 훈련 및 테스트 데이터셋을 생성하는 함수
+def create_train_test_data(preprocessed_dataset: pd.DataFrame):
+    print("\n     훈련 및 테스트 데이터셋 생성 중...")
+
+    outlier_mask = (preprocessed_dataset["Radius"] < 32) & (
+        preprocessed_dataset["Pass/Fail"]
+    ) # "Radius"가 32 미만이고 "Pass/Fail"이 True인 이상치 마스크 생성
+
+    # ~를 사용하여 반전합니다. 즉, 이상치가 아닌 행을 유지합니다.
+    preprocessed_dataset = preprocessed_dataset[~outlier_mask].reset_index(drop=True) # 이상치를 제거하고 인덱스 재설정
+
+    X = preprocessed_dataset.iloc[:, :-1] # 마지막 컬럼을 제외한 모든 컬럼 (특성)
+    y = preprocessed_dataset.iloc[:, -1] # 마지막 컬럼 (레이블)
+    X, kept_cols = variance_correlation_filter(
+        X, var_threshold=0.0, corr_threshold=0.99
+    ) # 분산 및 상관 관계 필터 적용
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    ) # 훈련 및 테스트 데이터셋으로 분할 (80% 훈련, 20% 테스트)
+    train_data = pd.concat([X_train, y_train], axis=1) # 훈련 특성과 레이블을 결합
+    test_data = pd.concat([X_test, y_test], axis=1) # 테스트 특성과 레이블을 결합
+
+    return train_data, test_data # 훈련 및 테스트 데이터 반환
