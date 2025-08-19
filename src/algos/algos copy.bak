@@ -11,7 +11,6 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import PolynomialFeatures, FunctionTransformer
 from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer  # 누락된 값 처리를 위한 Imputer 추가
 
 import optuna
 
@@ -29,6 +28,7 @@ import pprint
 from imblearn.over_sampling import SMOTE
 from imblearn.under_sampling import RandomUnderSampler
 from collections import Counter
+
 
 ##############################################################################################################################
 # 1) Baseline Model (Unchanged in logic) but keep in mind: it returns proba[:,1] as "pass"
@@ -142,6 +142,38 @@ def preprocess_dataset(initial_dataset: pd.DataFrame):
 
 
 # 분산 및 상관관계 필터를 적용하는 함수입니다.
+def variance_correlation_filter_old(
+    X: pd.DataFrame, var_threshold=0.0, corr_threshold=0.98
+):
+    """
+    1) 분산이 var_threshold 이하인 특징을 제거합니다.
+    2) 절대 상관관계가 corr_threshold를 초과하는 특징 쌍 중 하나를 제거합니다.
+    반환값:
+      (필터링된 X_filtered, 최종 컬럼 리스트 final_cols)
+    """
+    # 분산 임계값(VarianceThreshold)을 사용하여 분산이 0 이하인 컬럼을 제거합니다.
+    vt = VarianceThreshold(threshold=var_threshold)
+    X_vt = vt.fit_transform(X) # 데이터를 변환
+    vt_mask = vt.get_support() # 제거되지 않고 남은 컬럼의 마스크를 가져옴
+    vt_cols = X.columns[vt_mask] # 남은 컬럼 이름들을 가져옴
+    print("Number of features kept after Variance threshold", sum(vt_mask))
+
+    # 필터링된 데이터로 새로운 데이터프레임을 만듭니다.
+    X_vt_df = pd.DataFrame(X_vt, columns=vt_cols)
+
+    # 상관관계 행렬을 계산하고, 절대값으로 변환합니다.
+    corr_matrix = X_vt_df.corr().abs()
+    # 상관관계 행렬의 위쪽 삼각형 부분만 선택합니다 (중복 방지).
+    upper = corr_matrix.where(np.triu(np.ones_like(corr_matrix, dtype=bool), k=1))
+    # 상관관계가 임계값(0.98)보다 높은 컬럼들을 찾아서 제거할 리스트에 담습니다.
+    to_drop = [col for col in upper.columns if any(upper[col] > corr_threshold)]
+    # 해당 컬럼들을 데이터프레임에서 제거합니다.
+    X_filtered = X_vt_df.drop(to_drop, axis=1)
+    # 최종적으로 남은 컬럼 리스트를 저장합니다.
+    final_cols = list(X_filtered.columns)
+
+    return X_filtered, final_cols
+
 def variance_correlation_filter(
     X: pd.DataFrame, var_threshold=0.0, corr_threshold=0.98
 ):
@@ -197,6 +229,274 @@ def variance_correlation_filter(
 # from sklearn.preprocessing import PolynomialFeatures, FunctionTransformer
 # from sklearn.pipeline import Pipeline
 # from sklearn.compose import ColumnTransformer
+
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import PolynomialFeatures, FunctionTransformer
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer  # 누락된 값 처리를 위한 Imputer 추가
+
+def feature_generator_old(X):
+    """
+    입력 데이터프레임 X에 대해 수치형 피쳐에만 다양한 피쳐 생성 기법을 적용합니다.
+    누락된 값(NaN)을 처리하기 위해 SimpleImputer를 포함합니다.
+
+    Args:
+        X (pd.DataFrame): 원본 데이터프레임. 수치형 및 범주형 열을 포함할 수 있습니다.
+
+    Returns:
+        pd.DataFrame: 생성된 피쳐가 추가된 새로운 데이터프레임.
+    """
+    
+    # 1. 수치형 피쳐와 범주형 피쳐 식별
+    numerical_features = X.select_dtypes(include=np.number).columns
+    categorical_features = X.select_dtypes(exclude=np.number).columns
+    
+    if len(numerical_features) == 0:
+        print("경고: 수치형 피쳐가 없습니다. 피쳐 생성을 건너뜁니다.")
+        return X.copy()
+        
+    # 2. 수치형 피쳐를 위한 변환 파이프라인
+    # 쌍별 합과 차를 생성하는 함수 정의
+    def sum_diff_transformer_func(X_array):
+        n_features = X_array.shape[1]
+        sum_features = []
+        diff_features = []
+        for i in range(n_features):
+            for j in range(i + 1, n_features):
+                sum_features.append(X_array[:, i] + X_array[:, j])
+                diff_features.append(X_array[:, i] - X_array[:, j])
+        if not sum_features and not diff_features:
+            return np.empty((X_array.shape[0], 0))
+        return np.column_stack(sum_features + diff_features)
+
+    # 3. ColumnTransformer를 사용하여 수치형 피쳐에만 변환 적용
+    preprocessor = ColumnTransformer(
+        transformers=[
+            # PolynomialFeatures 이전에 Imputer를 적용하는 파이프라인 구성
+            ('poly_pipeline', 
+             Pipeline([
+                 ('imputer', SimpleImputer(strategy='mean')),
+                 ('poly', PolynomialFeatures(degree=2, include_bias=False))
+             ]),
+             numerical_features),
+            
+            # FunctionTransformer 이전에 Imputer를 적용하는 파이프라인 구성
+            ('sum_diff_pipeline',
+             Pipeline([
+                 ('imputer', SimpleImputer(strategy='mean')),
+                 ('sum_diff', FunctionTransformer(sum_diff_transformer_func))
+             ]),
+             numerical_features)
+        ],
+        remainder='passthrough'  # 범주형 피쳐는 그대로 통과
+    )
+    
+    # 변환 실행 및 피쳐 이름 생성
+    transformed_data = preprocessor.fit_transform(X)
+    
+    # 4. 변환된 피쳐 이름 얻기
+    # Pipeline 내의 변환기 접근
+    poly_feature_names = preprocessor.named_transformers_['poly_pipeline'].named_steps['poly'].get_feature_names_out(numerical_features)
+    
+    sum_diff_feature_names = []
+    for i in range(len(numerical_features)):
+        for j in range(i + 1, len(numerical_features)):
+            sum_diff_feature_names.append(f'{numerical_features[i]}_{numerical_features[j]}_sum')
+            sum_diff_feature_names.append(f'{numerical_features[i]}_{numerical_features[j]}_diff')
+    
+    # 모든 피쳐 이름 결합: [poly, sum_diff, 원본 범주형]
+    all_feature_names = list(poly_feature_names) + sum_diff_feature_names + list(categorical_features)
+    
+    X_gen = pd.DataFrame(transformed_data, columns=all_feature_names)
+    
+    # ColumnTransformer의 'remainder'가 원본 열을 마지막에 추가하므로,
+    # 원본 수치형 열이 중복되어 포함됩니다. 이를 제거해야 합니다.
+    # PolynomialFeatures가 원본 열을 이미 포함하므로, 원본 수치형 열은 따로 추가하지 않습니다.
+    X_gen = X_gen.loc[:, ~X_gen.columns.duplicated()]
+
+    return X_gen
+
+def feature_generator_old2(X, sum_features=False, diff_features=False, poly_features=False, poly_degree=2):
+    """
+    입력 데이터프레임 X에 대해 수치형 피처에 다양한 피처 생성 기법을 선택적으로 적용합니다.
+    누락된 값(NaN)을 처리하기 위해 SimpleImputer를 포함합니다.
+
+    Args:
+        X (pd.DataFrame): 원본 데이터프레임.
+        sum_features (bool): 쌍별 합 피처를 생성할지 여부.
+        diff_features (bool): 쌍별 차 피처를 생성할지 여부.
+        poly_features (bool): 다항식 피처를 생성할지 여부.
+        poly_degree (int): 다항식 피처의 차수.
+
+    Returns:
+        pd.DataFrame: 생성된 피처가 추가된 새로운 데이터프레임.
+    """
+    numerical_features = X.select_dtypes(include=np.number).columns
+    categorical_features = X.select_dtypes(exclude=np.number).columns
+    
+    if len(numerical_features) == 0:
+        print("경고: 수치형 피처가 없습니다. 피처 생성을 건너뜁니다.")
+        return X.copy()
+    
+    transformers = []
+    
+    if poly_features:
+        # 다항식 피처 생성 파이프라인
+        poly_pipeline = Pipeline([
+            ('imputer', SimpleImputer(strategy='mean')),
+            ('poly', PolynomialFeatures(degree=poly_degree, include_bias=False))
+        ])
+        transformers.append(('poly_pipeline', poly_pipeline, numerical_features))
+
+    if sum_features or diff_features:
+        # 쌍별 합과 차를 생성하는 함수 정의
+        def sum_diff_transformer_func(X_array):
+            n_features = X_array.shape[1]
+            gen_features = []
+            for i in range(n_features):
+                for j in range(i + 1, n_features):
+                    if sum_features:
+                        gen_features.append(X_array[:, i] + X_array[:, j])
+                    if diff_features:
+                        gen_features.append(X_array[:, i] - X_array[:, j])
+            if not gen_features:
+                return np.empty((X_array.shape[0], 0))
+            return np.column_stack(gen_features)
+
+        # 합/차 피처 생성 파이프라인
+        sum_diff_pipeline = Pipeline([
+            ('imputer', SimpleImputer(strategy='mean')),
+            ('sum_diff', FunctionTransformer(sum_diff_transformer_func))
+        ])
+        transformers.append(('sum_diff_pipeline', sum_diff_pipeline, numerical_features))
+        
+    # 아무것도 선택되지 않았을 경우, 원본 수치형 피처를 그대로 통과시킵니다.
+    if not transformers:
+        return X.copy()
+        
+    preprocessor = ColumnTransformer(
+        transformers=transformers,
+        remainder='passthrough'
+    )
+    
+    transformed_data = preprocessor.fit_transform(X)
+    
+    # 변환된 피처 이름 생성 및 결합
+    all_feature_names = []
+    
+    if poly_features:
+        poly_feature_names = preprocessor.named_transformers_['poly_pipeline'].named_steps['poly'].get_feature_names_out(numerical_features)
+        all_feature_names.extend(poly_feature_names)
+        
+    if sum_features or diff_features:
+        sum_diff_feature_names = []
+        for i in range(len(numerical_features)):
+            for j in range(i + 1, len(numerical_features)):
+                if sum_features:
+                    sum_diff_feature_names.append(f'{numerical_features[i]}_{numerical_features[j]}_sum')
+                if diff_features:
+                    sum_diff_feature_names.append(f'{numerical_features[i]}_{numerical_features[j]}_diff')
+        all_feature_names.extend(sum_diff_feature_names)
+    
+    all_feature_names.extend(categorical_features)
+    
+    X_gen = pd.DataFrame(transformed_data, columns=all_feature_names)
+    
+    # 중복된 컬럼 제거 (ColumnTransformer의 remainder='passthrough'로 인해 발생)
+    X_gen = X_gen.loc[:, ~X_gen.columns.duplicated()]
+
+    return X_gen	
+
+def feature_generator_old3(X, sum_features=False, diff_features=False, poly_features=False, poly_degree=2, apply_filter_gen=False, var_threshold_gen=0.0, corr_threshold_gen=0.98):
+    """
+    입력 데이터프레임 X에 대해 수치형 피처에 다양한 피처 생성 기법을 선택적으로 적용합니다.
+    누락된 값(NaN)을 처리하기 위해 SimpleImputer를 포함합니다.
+    
+    Args:
+        X (pd.DataFrame): 원본 데이터프레임.
+        sum_features (bool): 쌍별 합 피처를 생성할지 여부.
+        diff_features (bool): 쌍별 차 피처를 생성할지 여부.
+        poly_features (bool): 다항식 피처를 생성할지 여부.
+        poly_degree (int): 다항식 피처의 차수.
+        apply_filter_gen (bool): feature_generator 내에서 variance_correlation_filter 적용 여부.
+        var_threshold_gen (float): 내부 필터링을 위한 분산 임계값.
+        corr_threshold_gen (float): 내부 필터링을 위한 상관관계 임계값.
+
+    Returns:
+        pd.DataFrame: 생성된 피처가 추가된 새로운 데이터프레임.
+    """
+    
+    X_in = X.copy()
+    
+    if apply_filter_gen:
+        print(f"    - Feature Generator 내부에서 필터링 적용 (분산: {var_threshold_gen}, 상관관계: {corr_threshold_gen})")
+        X_filtered, _ = variance_correlation_filter(X, var_threshold=var_threshold_gen, corr_threshold=corr_threshold_gen)
+        X = X_filtered
+    else:
+        print("    - Feature Generator 내부 필터링 미적용")
+
+    numerical_features = X.select_dtypes(include=np.number).columns
+    categorical_features = X.select_dtypes(exclude=np.number).columns
+    
+    if len(numerical_features) == 0:
+        print("경고: 수치형 피처가 없습니다. 피처 생성을 건너뜁니다.")
+        return X.copy()
+    
+    # 생성될 새로운 피처들을 담을 데이터프레임
+    X_generated = pd.DataFrame(index=X.index)
+
+    if poly_features:
+        poly_pipeline = Pipeline([
+            ('imputer', SimpleImputer(strategy='mean')),
+            ('poly', PolynomialFeatures(degree=poly_degree, include_bias=False))
+        ])
+        
+        poly_data = poly_pipeline.fit_transform(X[numerical_features])
+        poly_feature_names = poly_pipeline.named_steps['poly'].get_feature_names_out(numerical_features)
+        X_generated = pd.concat([X_generated, pd.DataFrame(poly_data, columns=poly_feature_names, index=X.index)], axis=1)
+
+    if sum_features or diff_features:
+        def sum_diff_transformer_func(X_array):
+            n_features = X_array.shape[1]
+            gen_features = []
+            for i in range(n_features):
+                for j in range(i + 1, n_features):
+                    if sum_features:
+                        gen_features.append(X_array[:, i] + X_array[:, j])
+                    if diff_features:
+                        gen_features.append(X_array[:, i] - X_array[:, j])
+            if not gen_features:
+                return np.empty((X_array.shape[0], 0))
+            return np.column_stack(gen_features)
+
+        sum_diff_pipeline = Pipeline([
+            ('imputer', SimpleImputer(strategy='mean')),
+            ('sum_diff', FunctionTransformer(sum_diff_transformer_func))
+        ])
+        
+        sum_diff_data = sum_diff_pipeline.fit_transform(X[numerical_features])
+        sum_diff_feature_names = []
+        for i in range(len(numerical_features)):
+            for j in range(i + 1, len(numerical_features)):
+                if sum_features:
+                    sum_diff_feature_names.append(f'{numerical_features[i]}_{numerical_features[j]}_sum')
+                if diff_features:
+                    sum_diff_feature_names.append(f'{numerical_features[i]}_{numerical_features[j]}_diff')
+        
+        X_generated = pd.concat([X_generated, pd.DataFrame(sum_diff_data, columns=sum_diff_feature_names, index=X.index)], axis=1)
+
+        print(f"    - Feature Generator에서 생성된 피처 수: {X_generated.shape[1]}")
+
+    # 원본 컬럼과 생성된 컬럼을 결합
+    # 중복되는 컬럼을 제거하고 원본 컬럼이 앞에 오도록 재정렬
+    # X_combined = pd.concat([X, X_generated], axis=1)
+    X_combined = pd.concat([X_in, X_generated], axis=1)
+    X_combined = X_combined.loc[:, ~X_combined.columns.duplicated()]
+    
+
+    return X_combined
 
 def feature_generator(X, sum_features=False, diff_features=False, poly_features=False, poly_degree=2, apply_filter_gen=False, var_threshold_gen=0.0, corr_threshold_gen=0.98):
     """
@@ -300,6 +600,456 @@ def feature_generator(X, sum_features=False, diff_features=False, poly_features=
 ##############################################################################################################################
 
 # 훈련 및 테스트 데이터셋을 생성하는 함수
+def create_train_test_data_old(preprocessed_dataset: pd.DataFrame):
+    print("\n     훈련 및 테스트 데이터셋 생성 중...")
+
+    outlier_mask = (preprocessed_dataset["Radius"] < 32) & (
+        preprocessed_dataset["Pass/Fail"]
+    ) # "Radius"가 32 미만이고 "Pass/Fail"이 True인 이상치 마스크 생성
+
+    # ~를 사용하여 반전합니다. 즉, 이상치가 아닌 행을 유지합니다.
+    preprocessed_dataset = preprocessed_dataset[~outlier_mask].reset_index(drop=True) # 이상치를 제거하고 인덱스 재설정
+
+    X = preprocessed_dataset.iloc[:, :-1] # 마지막 컬럼을 제외한 모든 컬럼 (특성)
+    y = preprocessed_dataset.iloc[:, -1] # 마지막 컬럼 (레이블)
+    X, kept_cols = variance_correlation_filter(
+        X, var_threshold=0.0, corr_threshold=0.99
+    ) # 분산 및 상관 관계 필터 적용
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    ) # 훈련 및 테스트 데이터셋으로 분할 (80% 훈련, 20% 테스트)
+    train_data = pd.concat([X_train, y_train], axis=1) # 훈련 특성과 레이블을 결합
+    test_data = pd.concat([X_test, y_test], axis=1) # 테스트 특성과 레이블을 결합
+
+    return train_data, test_data # 훈련 및 테스트 데이터 반환
+
+
+def create_train_test_data_old2(
+    preprocessed_dataset: pd.DataFrame,
+    split_parameter: dict = None
+):
+    """
+    훈련/테스트 데이터 분할 및 샘플링을 적용하는 함수.
+
+    Args:
+        preprocessed_dataset (pd.DataFrame): 전처리된 데이터셋.
+        split_parameter (dict, optional): 데이터 분할 및 샘플링 관련 파라미터.
+            - 'test_size' (float, optional): 테스트 데이터셋 비율. Defaults to 0.2.
+            - 'random_state' (int, optional): 난수 시드. Defaults to 42.
+            - 'var_threshold' (float, optional): 분산 필터 임계값. Defaults to 0.0.
+            - 'corr_threshold' (float, optional): 상관 관계 필터 임계값. Defaults to 0.98.
+            - 'sampling_ratio' (float, optional): 소수 클래스(y=1) 비율.
+                - 1.0: 1:1 비율로 샘플링 (오버/언더 자동 적용).
+                - 1.0 초과: 오버샘플링. 1 : n_samples_majority * sampling_ratio[2, 4, ...]
+                - 1.0 미만: 언더샘플링. 0 : int(n_samples_minority / sampling_ratio[0.5, 0.25, ...])
+                - None: 샘플링 미적용.
+            - 'apply_feature_generation': True # 특성 생성을 적용하도록 설정
+
+    Returns:
+        tuple: (훈련 데이터, 테스트 데이터, 파라미터 정보 딕셔너리).
+    """
+    print("\n\n##############################################################################################################################")
+    print("# 3) Create Train/Test Split (훈련/테스트 데이터 분할) ")
+    print("##############################################################################################################################")
+    
+    print("\n    훈련 및 테스트 데이터셋 생성 중...")
+
+    # 기본 파라미터 설정
+    default_params = {
+        'test_size': 0.2,
+        'random_state': 42,
+        'var_threshold': 0.0,
+        'corr_threshold': 0.98,
+        'sampling_ratio': None
+    }
+    
+    # 입력 파라미터로 기본값 업데이트
+    if split_parameter:
+        default_params.update(split_parameter)
+        
+    split_parameter = default_params
+
+    # 이상치 제거
+    outlier_mask = (preprocessed_dataset["Radius"] < 32) & (preprocessed_dataset["Pass/Fail"])
+    preprocessed_dataset = preprocessed_dataset[~outlier_mask].reset_index(drop=True)
+
+    # 특성과 레이블 분리
+    X = preprocessed_dataset.iloc[:, :-1]
+    y = preprocessed_dataset.iloc[:, -1]
+    
+    
+    # Feature generation
+    X = feature_generator(X)
+    
+
+    # 분산 및 상관 관계 필터 적용
+    X, kept_cols = variance_correlation_filter(
+        X, 
+        var_threshold=split_parameter['var_threshold'], 
+        corr_threshold=split_parameter['corr_threshold']
+    )
+
+    # 훈련/테스트 데이터 분할
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, 
+        test_size=split_parameter['test_size'], 
+        random_state=split_parameter['random_state'], 
+        stratify=y
+    )
+    
+    print("\n    - 분할 전 훈련 데이터 클래스 분포:", sorted(Counter(y_train).items()))
+
+    # 샘플링 적용
+    sampling_ratio = split_parameter['sampling_ratio']
+    
+    if sampling_ratio is not None:
+        if sampling_ratio >= 1: # 오버샘플링 (또는 1:1 균형)
+            # y=1이 소수 클래스임을 가정하고 오버샘플링
+            # 소수 클래스(y=1)의 수를 다수 클래스(y=0) 수에 비례하여 조정
+            n_samples_majority = sum(y_train == 0)
+            target_minority_count = int(n_samples_majority * sampling_ratio)
+            sampling_strategy = {1: target_minority_count}
+            sampler = SMOTE(sampling_strategy=sampling_strategy, random_state=split_parameter['random_state'])
+            X_train, y_train = sampler.fit_resample(X_train, y_train)
+            print(f"    - 오버샘플링 적용 완료 (소수 클래스 비율: {sampling_ratio})")
+        
+        else: # 언더샘플링
+            # y=1이 소수 클래스임을 가정하고 언더샘플링
+            # 다수 클래스(y=0)의 수를 소수 클래스(y=1) 수에 비례하여 조정
+            n_samples_minority = sum(y_train == 1)
+            target_majority_count = int(n_samples_minority / sampling_ratio)
+            sampling_strategy = {0: target_majority_count}
+            sampler = RandomUnderSampler(sampling_strategy=sampling_strategy, random_state=split_parameter['random_state'])
+            X_train, y_train = sampler.fit_resample(X_train, y_train)
+            print(f"    - 언더샘플링 적용 완료 (소수 클래스 비율: {sampling_ratio})")
+            
+        print(f"    - 샘플링 적용 후 훈련 데이터 클래스 분포: {sorted(Counter(y_train).items())}")
+    else:
+        print("    - 샘플링 미적용")
+
+    # 훈련 및 테스트 데이터 결합
+    train_data = pd.concat([X_train, y_train], axis=1)
+    test_data = pd.concat([X_test, y_test], axis=1)
+
+    # 파라미터 정보 저장
+    split_parameter_info = split_parameter.copy()
+    split_parameter_info['sampling_applied'] = 'None' if sampling_ratio is None else ('oversampling' if sampling_ratio >= 1 else 'undersampling')
+    
+    return train_data, test_data, split_parameter_info
+
+def create_train_test_data_old3(
+    preprocessed_dataset: pd.DataFrame,
+    split_parameter: dict = None
+):
+    """
+    훈련/테스트 데이터 분할 및 샘플링을 적용하는 함수.
+    Feature Generation 적용 여부를 split_parameter에서 제어합니다.
+    """
+    print("\n\n##############################################################################################################################")
+    print("# 3) Create Train/Test Split (훈련/테스트 데이터 분할) ")
+    print("##############################################################################################################################")
+    
+    print("\n    훈련 및 테스트 데이터셋 생성 중...")
+
+    # 기본 파라미터 설정
+    default_params = {
+        'test_size': 0.2,
+        'random_state': 42,
+        'var_threshold': 0.0,
+        'corr_threshold': 0.98,
+        'sampling_ratio': None,
+        'apply_feature_generation': False  # 기본값으로 False 설정
+    }
+    
+    # 입력 파라미터로 기본값 업데이트
+    if split_parameter:
+        default_params.update(split_parameter)
+        
+    split_parameter = default_params
+
+    # 이상치 제거
+    outlier_mask = (preprocessed_dataset["Radius"] < 32) & (preprocessed_dataset["Pass/Fail"])
+    preprocessed_dataset = preprocessed_dataset[~outlier_mask].reset_index(drop=True)
+
+    # 특성과 레이블 분리
+    X = preprocessed_dataset.iloc[:, :-1]
+    y = preprocessed_dataset.iloc[:, -1]
+    
+    # 분산 및 상관 관계 필터 적용
+    # 이 부분은 변경되지 않았으므로 기존 코드 그대로 사용
+    # X, kept_cols = variance_correlation_filter(...)
+    # 해당 함수 정의가 없으므로 주석 처리
+    X, kept_cols = variance_correlation_filter(
+        X, 
+        var_threshold=split_parameter['var_threshold'], 
+        corr_threshold=split_parameter['corr_threshold']
+    )
+
+    # Feature generation 적용 여부 확인
+    if split_parameter['apply_feature_generation']:
+        print("    - Feature Generation 적용...")
+        X = feature_generator(X)
+        print("    - Feature Generation 완료. 새로운 피쳐 수:", X.shape[1] - (preprocessed_dataset.shape[1] - 1))
+    else:
+        print("    - Feature Generation 미적용.")
+
+
+    # 훈련/테스트 데이터 분할
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, 
+        test_size=split_parameter['test_size'], 
+        random_state=split_parameter['random_state'], 
+        stratify=y
+    )
+    
+    print("\n    - 분할 전 훈련 데이터 클래스 분포:", sorted(Counter(y_train).items()))
+
+    # 샘플링 적용
+    sampling_ratio = split_parameter['sampling_ratio']
+    
+    if sampling_ratio is not None:
+        if sampling_ratio >= 1: # 오버샘플링 (또는 1:1 균형)
+            n_samples_majority = sum(y_train == 0)
+            target_minority_count = int(n_samples_majority * sampling_ratio)
+            sampling_strategy = {1: target_minority_count}
+            sampler = SMOTE(sampling_strategy=sampling_strategy, random_state=split_parameter['random_state'])
+            X_train, y_train = sampler.fit_resample(X_train, y_train)
+            print(f"    - 오버샘플링 적용 완료 (소수 클래스 비율: {sampling_ratio})")
+        else: # 언더샘플링
+            n_samples_minority = sum(y_train == 1)
+            target_majority_count = int(n_samples_minority / sampling_ratio)
+            sampling_strategy = {0: target_majority_count}
+            sampler = RandomUnderSampler(sampling_strategy=sampling_strategy, random_state=split_parameter['random_state'])
+            X_train, y_train = sampler.fit_resample(X_train, y_train)
+            print(f"    - 언더샘플링 적용 완료 (소수 클래스 비율: {sampling_ratio})")
+            
+        print(f"    - 샘플링 적용 후 훈련 데이터 클래스 분포: {sorted(Counter(y_train).items())}")
+    else:
+        print("    - 샘플링 미적용")
+
+    # 훈련 및 테스트 데이터 결합
+    train_data = pd.concat([X_train, y_train], axis=1)
+    test_data = pd.concat([X_test, y_test], axis=1)
+
+    # 파라미터 정보 저장
+    split_parameter_info = split_parameter.copy()
+    split_parameter_info['sampling_applied'] = 'None' if sampling_ratio is None else ('oversampling' if sampling_ratio >= 1 else 'undersampling')
+    
+    return train_data, test_data, split_parameter_info
+
+def create_train_test_data_old4(
+    preprocessed_dataset: pd.DataFrame,
+    split_parameter: dict = None
+):
+    """
+    훈련/테스트 데이터 분할 및 샘플링을 적용하는 함수.
+    Feature Generation 적용 여부 및 옵션을 split_parameter에서 제어합니다.
+    """
+    print("\n\n##############################################################################################################################")
+    print("# 3) Create Train/Test Split (훈련/테스트 데이터 분할) ")
+    print("##############################################################################################################################")
+    
+    print("\n    훈련 및 테스트 데이터셋 생성 중...")
+
+    # 기본 파라미터 설정
+    default_params = {
+        'test_size': 0.2,
+        'random_state': 42,
+        'var_threshold': 0.0,
+        'corr_threshold': 0.98,
+        'sampling_ratio': None,
+        'apply_feature_generation': False,
+        'sum_features': False,
+        'diff_features': False,
+        'poly_features': False,
+        'poly_degree': 2
+    }
+    
+    # 입력 파라미터로 기본값 업데이트
+    if split_parameter:
+        default_params.update(split_parameter)
+        
+    split_parameter = default_params
+
+    # 이상치 제거
+    outlier_mask = (preprocessed_dataset["Radius"] < 32) & (preprocessed_dataset["Pass/Fail"])
+    preprocessed_dataset = preprocessed_dataset[~outlier_mask].reset_index(drop=True)
+
+    # 특성과 레이블 분리
+    X = preprocessed_dataset.iloc[:, :-1]
+    y = preprocessed_dataset.iloc[:, -1]
+    
+    # 분산 및 상관 관계 필터 적용
+    # (variance_correlation_filter 함수가 정의되어 있다고 가정)
+    X, kept_cols = variance_correlation_filter(
+        X, 
+        var_threshold=split_parameter['var_threshold'], 
+        corr_threshold=split_parameter['corr_threshold']
+    )
+    
+    # Feature generation 적용 여부 확인
+    if split_parameter['apply_feature_generation']:
+        print("    - Feature Generation 적용...")
+        X = feature_generator(
+            X, 
+            sum_features=split_parameter['sum_features'],
+            diff_features=split_parameter['diff_features'],
+            poly_features=split_parameter['poly_features'],
+            poly_degree=split_parameter['poly_degree']
+        )
+        print("    - Feature Generation 완료. 새로운 피처 수:", X.shape[1] - (preprocessed_dataset.shape[1] - 1))
+    else:
+        print("    - Feature Generation 미적용.")
+
+    # 훈련/테스트 데이터 분할
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, 
+        test_size=split_parameter['test_size'], 
+        random_state=split_parameter['random_state'], 
+        stratify=y
+    )
+    
+    print("\n    - 분할 전 훈련 데이터 클래스 분포:", sorted(Counter(y_train).items()))
+
+    # 샘플링 적용
+    sampling_ratio = split_parameter['sampling_ratio']
+    
+    if sampling_ratio is not None:
+        if sampling_ratio >= 1: # 오버샘플링 (또는 1:1 균형)
+            n_samples_majority = sum(y_train == 0)
+            target_minority_count = int(n_samples_majority * sampling_ratio)
+            sampling_strategy = {1: target_minority_count}
+            sampler = SMOTE(sampling_strategy=sampling_strategy, random_state=split_parameter['random_state'])
+            X_train, y_train = sampler.fit_resample(X_train, y_train)
+            print(f"    - 오버샘플링 적용 완료 (소수 클래스 비율: {sampling_ratio})")
+        else: # 언더샘플링
+            n_samples_minority = sum(y_train == 1)
+            target_majority_count = int(n_samples_minority / sampling_ratio)
+            sampling_strategy = {0: target_majority_count}
+            sampler = RandomUnderSampler(sampling_strategy=sampling_strategy, random_state=split_parameter['random_state'])
+            X_train, y_train = sampler.fit_resample(X_train, y_train)
+            print(f"    - 언더샘플링 적용 완료 (소수 클래스 비율: {sampling_ratio})")
+            
+        print(f"    - 샘플링 적용 후 훈련 데이터 클래스 분포: {sorted(Counter(y_train).items())}")
+    else:
+        print("    - 샘플링 미적용")
+
+    # 훈련 및 테스트 데이터 결합
+    train_data = pd.concat([X_train, y_train], axis=1)
+    test_data = pd.concat([X_test, y_test], axis=1)
+
+    # 파라미터 정보 저장
+    split_parameter_info = split_parameter.copy()
+    split_parameter_info['sampling_applied'] = 'None' if sampling_ratio is None else ('oversampling' if sampling_ratio >= 1 else 'undersampling')
+    
+    return train_data, test_data, split_parameter_info    
+
+def create_train_test_data_old5(
+    preprocessed_dataset: pd.DataFrame,
+    split_parameter: dict = None
+):
+    """
+    훈련/테스트 데이터 분할 및 샘플링을 적용하는 함수.
+    Feature Generation 적용 여부 및 옵션을 split_parameter에서 제어합니다.
+    """
+    print("\n\n##############################################################################################################################")
+    print("# 3) Create Train/Test Split (훈련/테스트 데이터 분할) ")
+    print("##############################################################################################################################")
+    
+    print("\n    훈련 및 테스트 데이터셋 생성 중...")
+
+    default_params = {
+        'test_size': 0.2,
+        'random_state': 42,
+        'sampling_ratio': None,
+        'apply_feature_generation': False,
+        'sum_features': False,
+        'diff_features': False,
+        'poly_features': False,
+        'poly_degree': 2,
+        'apply_filter_split': False,
+        'var_threshold_split': 0.0,
+        'corr_threshold_split': 0.98,
+        'apply_filter_gen': False,
+        'var_threshold_gen': 0.0,
+        'corr_threshold_gen': 0.98,
+    }
+    
+    if split_parameter:
+        default_params.update(split_parameter)
+    split_parameter = default_params
+
+    outlier_mask = (preprocessed_dataset["Radius"] < 32) & (preprocessed_dataset["Pass/Fail"])
+    preprocessed_dataset = preprocessed_dataset[~outlier_mask].reset_index(drop=True)
+
+    X = preprocessed_dataset.iloc[:, :-1]
+    y = preprocessed_dataset.iloc[:, -1]
+    
+    # 분할 전 필터링 적용 (첫 번째 필터링 단계)
+    if split_parameter['apply_filter_split']:
+        print(f"    - 분할 전 필터링 적용 (분산: {split_parameter['var_threshold_split']}, 상관관계: {split_parameter['corr_threshold_split']})")
+        X, _ = variance_correlation_filter(X, var_threshold=split_parameter['var_threshold_split'], corr_threshold=split_parameter['corr_threshold_split'])
+    else:
+        print("    - 분할 전 필터링 미적용.")
+        
+    
+    # Feature generation 적용 여부 확인
+    if split_parameter['apply_feature_generation']:
+        print("    - Feature Generation 적용...")
+        X = feature_generator(
+            X, 
+            sum_features=split_parameter['sum_features'],
+            diff_features=split_parameter['diff_features'],
+            poly_features=split_parameter['poly_features'],
+            poly_degree=split_parameter['poly_degree'],
+            apply_filter_gen=split_parameter['apply_filter_gen'],
+            var_threshold_gen=split_parameter['var_threshold_gen'],
+            corr_threshold_gen=split_parameter['corr_threshold_gen']
+        )
+        print("    - Feature Generation 완료. 새로운 피쳐 수:", X.shape[1] - (preprocessed_dataset.shape[1] - 1))
+    else:
+        print("    - Feature Generation 미적용.")
+    
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, 
+        test_size=split_parameter['test_size'], 
+        random_state=split_parameter['random_state'], 
+        stratify=y
+    )
+    
+    print("\n    - 분할 전 훈련 데이터 클래스 분포:", sorted(Counter(y_train).items()))
+
+    sampling_ratio = split_parameter['sampling_ratio']
+    
+    if sampling_ratio is not None:
+        if sampling_ratio >= 1:
+            n_samples_majority = sum(y_train == 0)
+            target_minority_count = int(n_samples_majority * sampling_ratio)
+            sampling_strategy = {1: target_minority_count}
+            sampler = SMOTE(sampling_strategy=sampling_strategy, random_state=split_parameter['random_state'])
+            X_train, y_train = sampler.fit_resample(X_train, y_train)
+            print(f"    - 오버샘플링 적용 완료 (소수 클래스 비율: {sampling_ratio})")
+        else:
+            n_samples_minority = sum(y_train == 1)
+            target_majority_count = int(n_samples_minority / sampling_ratio)
+            sampling_strategy = {0: target_majority_count}
+            sampler = RandomUnderSampler(sampling_strategy=sampling_strategy, random_state=split_parameter['random_state'])
+            X_train, y_train = sampler.fit_resample(X_train, y_train)
+            print(f"    - 언더샘플링 적용 완료 (소수 클래스 비율: {sampling_ratio})")
+            
+        print(f"    - 샘플링 적용 후 훈련 데이터 클래스 분포: {sorted(Counter(y_train).items())}")
+    else:
+        print("    - 샘플링 미적용")
+
+    train_data = pd.concat([X_train, y_train], axis=1)
+    test_data = pd.concat([X_test, y_test], axis=1)
+
+    split_parameter_info = split_parameter.copy()
+    split_parameter_info['sampling_applied'] = 'None' if sampling_ratio is None else ('oversampling' if sampling_ratio >= 1 else 'undersampling')
+    
+    return train_data, test_data, split_parameter_info
+
 def create_train_test_data(
     preprocessed_dataset: pd.DataFrame,
     split_parameter: dict = None
@@ -458,6 +1208,52 @@ def create_train_test_data(
     split_parameter_info['final_train_feature_count'] = train_data.shape[1] - 1
     
     return train_data, test_data, split_parameter_info
+
+
+# # --- 입출력 파라미터 샘플 ---
+# # 1. 예제 데이터 생성
+# # 실제 사용 시에는 전처리된 데이터프레임을 사용해야 합니다.
+# from sklearn.datasets import make_classification
+# data = make_classification(n_samples=500, n_features=10, weights=[0.9, 0.1], random_state=42)
+# preprocessed_dataset = pd.DataFrame(data[0], columns=[f'feature_{i}' for i in range(10)])
+# preprocessed_dataset['Radius'] = np.random.rand(500) * 50
+# preprocessed_dataset['Pass/Fail'] = data[1]
+
+# # 2. 함수 호출 예시
+# # 모든 파라미터가 포함된 split_parameter 딕셔너리를 정의합니다.
+# full_parameters = {
+#     'test_size': 0.3,
+#     'random_state': 100,
+#     'var_threshold': 0.01,
+#     'corr_threshold': 0.95,
+#     'sampling_ratio': 1.0 # 1.0이면 1:1 비율로 오버샘플링/언더샘플링 자동 적용
+# }
+
+# print("\n[예제 1] 오버샘플링 적용 (소수 클래스 비율 1:1)")
+# print(f"    입력 파라미터: {{'sampling_ratio': 1.0}}")
+# train_data_full, test_data_full, info_full = create_train_test_data(
+#     preprocessed_dataset, 
+#     split_parameter={'sampling_ratio': 1.0}
+# )
+# print("반환된 파라미터 정보:", info_full)
+
+# print("\n\n[예제 2] 언더샘플링 적용 (소수 클래스 비율 0.5)")
+# print(f"    입력 파라미터: {{'sampling_ratio': 0.5}}")
+# train_data_undersampling, test_data_undersampling, info_undersampling = create_train_test_data(
+#     preprocessed_dataset, 
+#     split_parameter={'sampling_ratio': 0.5}
+# )
+# print("반환된 파라미터 정보:", info_undersampling)
+
+# print("\n\n[예제 3] 샘플링 미적용 (sampling_ratio=None)")
+# print(f"    입력 파라미터: {{'sampling_ratio': None}}")
+# train_data_no_sampling, test_data_no_sampling, info_no_sampling = create_train_test_data(
+#     preprocessed_dataset, 
+#     split_parameter={'sampling_ratio': None}
+# )
+# print("반환된 파라미터 정보:", info_no_sampling)
+
+
 
 
 ##############################################################################################################################
