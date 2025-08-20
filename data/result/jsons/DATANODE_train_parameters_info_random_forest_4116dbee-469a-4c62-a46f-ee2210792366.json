@@ -1,0 +1,42 @@
+{
+    "n_trials": 50,
+    "cv": 5,
+    "param_ranges": {
+        "max_depth": {
+            "high": 30,
+            "low": 10
+        },
+        "max_features": {
+            "choices": [
+                "sqrt",
+                0.5,
+                0.8
+            ]
+        },
+        "min_samples_leaf": {
+            "high": 10,
+            "low": 1
+        },
+        "min_samples_split": {
+            "high": 20,
+            "low": 2
+        },
+        "n_estimators": {
+            "high": 300,
+            "low": 100
+        },
+        "class_weight_multiplier": {
+            "low": 1,
+            "high": 3546
+        }
+    },
+    "best_params": {
+        "n_estimators": 279,
+        "max_depth": 10,
+        "min_samples_split": 9,
+        "min_samples_leaf": 2,
+        "max_features": "sqrt",
+        "class_weight_multiplier": 2266
+    },
+    "best_class_weight_multiplier": 2266
+}

@@ -1,0 +1,48 @@
+{
+    "cv": 5,
+    "f2_rare_scorer": {
+        "beta": 2,
+        "name": "fbeta_score",
+        "pos_label": 1
+    },
+    "function_name": "train_model_xgboost_optuna",
+    "n_trials": 50,
+    "param_ranges": {
+        "colsample_bytree": {
+            "high": 1.0,
+            "low": 0.7
+        },
+        "gamma": {
+            "high": 0.5,
+            "low": 0.1
+        },
+        "learning_rate": {
+            "high": 0.2,
+            "low": 0.01
+        },
+        "max_depth": {
+            "high": 20,
+            "low": 5
+        },
+        "n_estimators": {
+            "high": 300,
+            "low": 100
+        },
+        "reg_alpha": {
+            "high": 0.1,
+            "low": 1e-06
+        },
+        "reg_lambda": {
+            "high": 0.1,
+            "low": 1e-06
+        },
+        "subsample": {
+            "high": 1.0,
+            "low": 0.7
+        }
+    },
+    "ratio_multiplier_range": {
+        "high": 1.2,
+        "low": 0.8
+    }
+}

@@ -34,8 +34,8 @@ feature_selector_default = \
         "threshold": 0
     },
     "correlation_filter": {
-        "threshold": 0.02
-        # "threshold": 0.08
+        # "threshold": 0.02
+        "threshold": 0.08
     }
 }
 
@@ -47,8 +47,8 @@ feature_selection_info_cfg = Config.configure_data_node(id="feature_selection_in
 # split_parameter (dict, optional): 데이터 분할 및 샘플링 관련 파라미터.
 #     - 'test_size' (float, optional): 테스트 데이터셋 비율. Defaults to 0.2.
 #     - 'random_state' (int, optional): 난수 시드. Defaults to 42.
-#     - 'var_threshold' (float, optional): 분산 필터 임계값. Defaults to 0.0.
-#     - 'corr_threshold' (float, optional): 상관 관계 필터 임계값. Defaults to 0.98.
+#     - 'var_threshold_split' (float, optional): 분산 필터 임계값. Defaults to 0.0.
+#     - 'corr_threshold_split' (float, optional): 상관 관계 필터 임계값. Defaults to 0.98.
 #     - 'sampling_ratio' (float, optional): 소수 클래스(y=1) 비율.
 #         - 1.0: 1:1 비율로 샘플링 (오버/언더 자동 적용).
 #         - 1.0 초과: 오버샘플링. 1 : n_samples_majority * sampling_ratio[2, 4, ...]
@@ -65,7 +65,7 @@ split_parameter_default = \
         
         'sampling_ratio': None,
         
-        'apply_feature_generation': True,
+        'apply_feature_generation': False,
         'sum_features': True,  # 쌍별 합 피처 생성 여부
         'diff_features': True,  # 쌍별 차 피처 생성 여부
         'poly_features': True,  # 다항식 피처 생성 여부
@@ -119,15 +119,15 @@ train_parameters_list_default = \
                                                                         'Radius'],
                                                            'Importance': [56.6,
                                                                           4.65,
-                                                                          96.9]}}},
+                                                                          96.9]}}
+              },
  'logistic_regression': {'train_model_logistic_regression': {'class_weight_multiplier': 'len(y) '
                                                                                         '- '
                                                                                         'n_pos',
                                                              'function_name': 'train_model_logistic_regression',
-                                                            #  'max_iter': 1000,
                                                              'max_iter': 10,
                                                              'solver': 'lbfgs'},
-                         'train_parameters_optuna': {'f2_rare_scorer': {'beta': 2,
+                         'train_model_logistic_regression_optuna': {'f2_rare_scorer': {'beta': 2,
                                                                         'name': 'fbeta_score',
                                                                         'pos_label': 1},
                                                      'function_name': 'train_model_logistic_regression_optuna',
@@ -136,10 +136,24 @@ train_parameters_list_default = \
                                                                             20],
                                                                       'class_weight_multiplier': [1,
                                                                                                   20],
-                                                                    #   'max_iter': 1000,
                                                                       'max_iter': 10,
                                                                       'solver': ['liblinear',
-                                                                                 'saga']}}},
+                                                                                 'saga']}},
+                        'train_model_logistic_regression_cv': {'cv': 3,
+                                                               'f2_rare_scorer': {'beta': 2,
+                                                                                  'name': 'fbeta_score',
+                                                                                  'pos_label': 1},
+                                                               'function_name': 'train_model_logistic_regression_cv',
+                                                               'param_grid': {'C': [0.0001,
+                                                                                    0.001,
+                                                                                    0.01,
+                                                                                    0.1,
+                                                                                    1,
+                                                                                    10,
+                                                                                    20],
+                                                                              'solver': ['lbfgs',
+                                                                                         'liblinear']}},
+                         },
  'random_forest': {'train_model_rf_cv': {'class_weight_multiplier': 'len(y) - '
                                                                     'sum(y)',
                                          'cv': 3,
@@ -157,6 +171,9 @@ train_parameters_list_default = \
                                                                          100]},
                                          'verbose': 1},
                    'train_model_rf_optuna': {'cv': 5,
+                                             'f2_rare_scorer': {'beta': 2,
+                                                                'name': 'fbeta_score',
+                                                                'pos_label': 1},
                                              'function_name': 'train_model_rf_optuna',
                                              'n_trials': 50,
                                              'param_ranges': {'max_depth': {'high': 30,
@@ -169,7 +186,22 @@ train_parameters_list_default = \
                                                               'min_samples_split': {'high': 20,
                                                                                     'low': 2},
                                                               'n_estimators': {'high': 300,
-                                                                               'low': 100}}}},
+                                                                               'low': 100}}},
+                   'train_model_rf_optuna_old': {'cv': 5,
+                                                 'function_name': 'train_model_rf_optuna',
+                                                 'n_trials': 50,
+                                                 'param_ranges': {'max_depth': {'high': 30,
+                                                                                'low': 10},
+                                                                  'max_features': {'choices': ['sqrt',
+                                                                                               0.5,
+                                                                                               0.8]},
+                                                                  'min_samples_leaf': {'high': 10,
+                                                                                       'low': 1},
+                                                                  'min_samples_split': {'high': 20,
+                                                                                        'low': 2},
+                                                                  'n_estimators': {'high': 300,
+                                                                                   'low': 100}}}
+            },
  'xgboost': {'train_model_xgboost_cv': {'cv': 3,
                                         'f2_rare_scorer': {'beta': 2,
                                                            'name': 'fbeta_score',
@@ -184,7 +216,7 @@ train_parameters_list_default = \
                                                                         100]},
                                         'scale_pos_weight_multiplier': 2,
                                         'verbose': 1},
-             'train_model_xgboost_optuna': {'cv': 5,
+             'train_model_xgboost_optuna_old': {'cv': 5,
                                             'function_name': 'train_model_xgboost_optuna',
                                             'n_trials': 50,
                                             'param_ranges': {'colsample_bytree': {'high': 1.0,
@@ -204,8 +236,33 @@ train_parameters_list_default = \
                                                              'subsample': {'high': 1.0,
                                                                            'low': 0.7}},
                                             'ratio_multiplier_range': {'high': 1.2,
-                                                                       'low': 0.8}}}}
-
+                                                                       'low': 0.8}},
+             'train_model_xgboost_optuna': {'cv': 5,
+                                            'f2_rare_scorer': {'beta': 2, # f2_rare_scorer 추가
+                                                               'name': 'fbeta_score',
+                                                               'pos_label': 1},
+                                            'function_name': 'train_model_xgboost_optuna',
+                                            'n_trials': 50,
+                                            'param_ranges': {'colsample_bytree': {'high': 1.0,
+                                                                                  'low': 0.7},
+                                                             'gamma': {'high': 0.5,
+                                                                       'low': 0.1},
+                                                             'learning_rate': {'high': 0.2,
+                                                                               'low': 0.01},
+                                                             'max_depth': {'high': 20,
+                                                                           'low': 5},
+                                                             'n_estimators': {'high': 300,
+                                                                              'low': 100},
+                                                             'reg_alpha': {'high': 0.1,
+                                                                           'low': 1e-06},
+                                                             'reg_lambda': {'high': 0.1,
+                                                                            'low': 1e-06},
+                                                             'subsample': {'high': 1.0,
+                                                                           'low': 0.7}},
+                                            'ratio_multiplier_range': {'high': 1.2,
+                                                                       'low': 0.8}}
+             }
+ }
 train_parameters_list_default_cfg = Config.configure_data_node(
     id="train_parameters_list_default", storage_type="json",  default_data=train_parameters_list_default
 )
@@ -213,14 +270,20 @@ train_parameters_list_default_cfg = Config.configure_data_node(
 # Define models and their corresponding functions
 models = {
     "baseline": train_model_baseline,
+    
     # "logistic_regression": train_model_logistic_regression,
-    "logistic_regression": train_model_logistic_regression_optuna,
+    "logistic_regression": train_model_logistic_regression_cv,
+    # "logistic_regression": train_model_logistic_regression_optuna,
+    
     # "random_forest": train_model_rf_cv,
     "random_forest": train_model_rf_optuna,
+    
     # "xgboost": train_model_xgboost_cv,
     "xgboost": train_model_xgboost_optuna,
     # "tree": train_model_decision_tree,
+    
 }
+models_cfg = Config.configure_data_node(id="models", storage_type="json",  default_data=models)
 
 
 # Create data nodes for each model
@@ -381,7 +444,8 @@ for model, function in models.items():
 
 scenario_cfg = Config.configure_scenario(
     id="churn_classification",
-    additional_data_node_configs = [
+    additional_data_node_configs=[
+        models_cfg,
         train_parameters_list_default_cfg,
         feature_selector_default_cfg,
     ],

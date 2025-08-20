@@ -1,0 +1,16 @@
+{
+    "test_size": 0.2,
+    "random_state": 42,
+    "apply_filter_split": true,
+    "var_threshold_split": 0.0,
+    "corr_threshold_split": 0.98,
+    "sampling_ratio": null,
+    "apply_feature_generation": false,
+    "sum_features": true,
+    "diff_features": true,
+    "poly_features": true,
+    "poly_degree": 2,
+    "apply_filter_gen": true,
+    "var_threshold_gen": 0.0,
+    "corr_threshold_gen": 0.1
+}

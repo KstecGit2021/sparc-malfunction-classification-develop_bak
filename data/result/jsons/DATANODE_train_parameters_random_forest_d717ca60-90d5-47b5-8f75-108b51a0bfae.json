@@ -1,0 +1,35 @@
+{
+    "cv": 5,
+    "f2_rare_scorer": {
+        "beta": 2,
+        "name": "fbeta_score",
+        "pos_label": 1
+    },
+    "function_name": "train_model_rf_optuna",
+    "n_trials": 50,
+    "param_ranges": {
+        "max_depth": {
+            "high": 30,
+            "low": 10
+        },
+        "max_features": {
+            "choices": [
+                "sqrt",
+                0.5,
+                0.8
+            ]
+        },
+        "min_samples_leaf": {
+            "high": 10,
+            "low": 1
+        },
+        "min_samples_split": {
+            "high": 20,
+            "low": 2
+        },
+        "n_estimators": {
+            "high": 300,
+            "low": 100
+        }
+    }
+}

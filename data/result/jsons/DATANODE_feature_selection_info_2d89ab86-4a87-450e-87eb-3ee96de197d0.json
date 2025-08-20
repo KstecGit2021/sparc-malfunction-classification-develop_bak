@@ -1,0 +1,24 @@
+{
+    "feature_selector_name": "CorrelationsClassifier",
+    "f2_scorer": {
+        "name": "fbeta_score",
+        "beta": 4,
+        "pos_label": 1
+    },
+    "variance_threshold_filter": {
+        "threshold": 0
+    },
+    "correlation_filter": {
+        "threshold": 0.08
+    },
+    "initial_feature_count": 789,
+    "final_feature_count": 6,
+    "final_features": [
+        "Radius",
+        "SensorOffsetHot-Cold",
+        "band gap dpat_ok for band gap",
+        "AC_SENSE_CRN 2 of 1103959_69_1133592_RPP",
+        "AC_V_AFE_CRN_5_8_8_P_F 2 of 1103959_69_1133592_RPP",
+        "FAILING_BINOUTS(1) of 1103959_69_1133529_cp1_cp1p5_YPP_GbSbPoPo"
+    ]
+}

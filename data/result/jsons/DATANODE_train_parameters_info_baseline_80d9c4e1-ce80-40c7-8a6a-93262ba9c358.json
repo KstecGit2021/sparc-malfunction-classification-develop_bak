@@ -1,0 +1,14 @@
+{
+    "importance_data": {
+        "Features": [
+            "SensorOffsetHot-Cold",
+            "band gap dpat_ok for band gap",
+            "Radius"
+        ],
+        "Importance": [
+            56.6,
+            4.65,
+            96.9
+        ]
+    }
+}

@@ -783,3 +783,364 @@ def create_train_test_data(preprocessed_dataset: pd.DataFrame):
     test_data = pd.concat([X_test, y_test], axis=1) # 테스트 특성과 레이블을 결합
 
     return train_data, test_data # 훈련 및 테스트 데이터 반환
+
+
+@@Q004
+
+# 필요한 라이브러리들을 불러옵니다.
+# scikit-learn에서 여러 머신러닝 모델과 유틸리티를 가져옵니다.
+from sklearn.linear_model import LogisticRegression         # 로지스틱 회귀 모델
+from sklearn.ensemble import RandomForestClassifier         # 랜덤 포레스트 분류 모델
+from sklearn.model_selection import train_test_split, GridSearchCV # 데이터 분할 및 하이퍼파라미터 튜닝을 위한 도구
+from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.feature_selection import SelectKBest, VarianceThreshold, f_classif # 특징(변수) 선택을 위한 도구
+from sklearn.tree import DecisionTreeClassifier             # 의사결정나무 모델
+from sklearn.metrics import roc_auc_score, fbeta_score, make_scorer, precision_score # 모델 성능 평가 지표
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import PolynomialFeatures, FunctionTransformer
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer  # 누락된 값 처리를 위한 Imputer 추가
+
+import optuna
+
+from xgboost import XGBClassifier                           # XGBoost 분류 모델 (경사 부스팅)
+import shap                                                 # SHAP (SHapley Additive exPlanations) 라이브러리, 모델 예측에 대한 설명력을 제공합니다.
+import matplotlib.pyplot as plt                             # 데이터 시각화를 위한 라이브러리
+
+# 데이터 처리 및 기타 작업을 위한 라이브러리들을 불러옵니다.
+import pandas as pd                                         # 데이터프레임 구조를 다루는 데 필수적인 라이브러리
+import numpy as np                                          # 숫자 연산을 위한 라이브러리
+import datetime as dt                                       # 날짜와 시간을 다루는 라이브러리
+import json                                                 # JSON 형식의 데이터를 처리하는 라이브러리
+import pprint
+
+from imblearn.over_sampling import SMOTE
+from imblearn.under_sampling import RandomUnderSampler
+from collections import Counter
+
+f2_rare_scorer = make_scorer(fbeta_score, beta=4, pos_label=1)
+
+
+train_parameters = \
+{'baseline': {'train_model_baseline': {'function_name': 'train_model_baseline',
+                                       'importance_data': {'Features': ['SensorOffsetHot-Cold',
+                                                                        'band '
+                                                                        'gap '
+                                                                        'dpat_ok '
+                                                                        'for '
+                                                                        'band '
+                                                                        'gap',
+                                                                        'Radius'],
+                                                           'Importance': [56.6,
+                                                                          4.65,
+                                                                          96.9]}}},
+ 'logistic_regression': {'train_model_logistic_regression': {'class_weight_multiplier': 'len(y) '
+                                                                                        '- '
+                                                                                        'n_pos',
+                                                             'function_name': 'train_model_logistic_regression',
+                                                            #  'max_iter': 1000,
+                                                             'max_iter': 10,
+                                                             'solver': 'lbfgs'},
+                         'train_parameters_optuna': {'f2_rare_scorer': {'beta': 2,
+                                                                        'name': 'fbeta_score',
+                                                                        'pos_label': 1},
+                                                     'function_name': 'train_model_logistic_regression_optuna',
+                                                     'n_trials': 50,
+                                                     'param_ranges': {'C': [0.0001,
+                                                                            20],
+                                                                      'class_weight_multiplier': [1,
+                                                                                                  20],
+                                                                    #   'max_iter': 1000,
+                                                                      'max_iter': 10,
+                                                                      'solver': ['liblinear',
+                                                                                 'saga']}}},
+ 'random_forest': {'train_model_rf_cv': {'class_weight_multiplier': 'len(y) - '
+                                                                    'sum(y)',
+                                         'cv': 3,
+                                         'f2_rare_scorer': {'beta': 2,
+                                                            'name': 'fbeta_score',
+                                                            'pos_label': 1},
+                                         'function_name': 'train_model_rf_cv',
+                                         'param_grid': {'max_depth': [2,
+                                                                      5,
+                                                                      None],
+                                                        'min_samples_split': [2,
+                                                                              5],
+                                                        'n_estimators': [20,
+                                                                         50,
+                                                                         100]},
+                                         'verbose': 1},
+                   'train_model_rf_optuna': {'cv': 5,
+                                             'function_name': 'train_model_rf_optuna',
+                                             'n_trials': 50,
+                                             'param_ranges': {'max_depth': {'high': 30,
+                                                                            'low': 10},
+                                                              'max_features': {'choices': ['sqrt',
+                                                                                           0.5,
+                                                                                           0.8]},
+                                                              'min_samples_leaf': {'high': 10,
+                                                                                   'low': 1},
+                                                              'min_samples_split': {'high': 20,
+                                                                                    'low': 2},
+                                                              'n_estimators': {'high': 300,
+                                                                               'low': 100}}}},
+ 'xgboost': {'train_model_xgboost_cv': {'cv': 3,
+                                        'f2_rare_scorer': {'beta': 2,
+                                                           'name': 'fbeta_score',
+                                                           'pos_label': 1},
+                                        'function_name': 'train_model_xgboost_cv',
+                                        'param_grid': {'learning_rate': [0.01,
+                                                                         0.1,
+                                                                         0.2],
+                                                       'max_depth': [2, 5],
+                                                       'n_estimators': [30,
+                                                                        50,
+                                                                        100]},
+                                        'scale_pos_weight_multiplier': 2,
+                                        'verbose': 1},
+             'train_model_xgboost_optuna': {'cv': 5,
+                                            'function_name': 'train_model_xgboost_optuna',
+                                            'n_trials': 50,
+                                            'param_ranges': {'colsample_bytree': {'high': 1.0,
+                                                                                  'low': 0.7},
+                                                             'gamma': {'high': 0.5,
+                                                                       'low': 0.1},
+                                                             'learning_rate': {'high': 0.2,
+                                                                               'low': 0.01},
+                                                             'max_depth': {'high': 20,
+                                                                           'low': 5},
+                                                             'n_estimators': {'high': 300,
+                                                                              'low': 100},
+                                                             'reg_alpha': {'high': 0.1,
+                                                                           'low': 1e-06},
+                                                             'reg_lambda': {'high': 0.1,
+                                                                            'low': 1e-06},
+                                                             'subsample': {'high': 1.0,
+                                                                           'low': 0.7}},
+                                            'ratio_multiplier_range': {'high': 1.2,
+                                                                       'low': 0.8}}}}
+
+
+
+##############################################################################################################################
+# 9) XGBoost with CV & F2 on class=1
+# 9) 클래스 1에 대한 F2를 사용한 교차 검증 XGBoost
+##############################################################################################################################
+
+# 교차 검증 및 하이퍼파라미터 튜닝을 통해 XGBoost 모델을 훈련하는 함수
+def train_model_xgboost_cv(train_dataset: pd.DataFrame, feature_selection_info: dict, train_parameters: dict = None):
+    print(
+        "    Training the XGBoost model with cross-validation & hyperparameter tuning...\n"
+    )
+
+    model_parameter_info = {}
+
+    X, y = train_dataset.iloc[:, :-1], train_dataset.iloc[:, -1]
+
+    final_features = feature_selection_info['final_features']
+    X = X[final_features]
+
+    # train_parameters에서 알고리즘 이름에 따라 파라미터 설정
+    if train_parameters and train_parameters.get('function_name') == 'train_model_xgboost_cv':
+        param_grid = train_parameters.get('param_grid', {})
+        scale_pos_weight_multiplier = train_parameters.get('scale_pos_weight_multiplier', 2)
+        cv = train_parameters.get('cv', 3)
+        verbose = train_parameters.get('verbose', 1)
+        
+        # f2_rare_scorer 설정 로직 반영
+        scoring_params = train_parameters.get('f2_rare_scorer', {})
+        if scoring_params.get('name') == 'fbeta_score':
+            beta = scoring_params.get('beta', 2)
+            pos_label = scoring_params.get('pos_label', 1)
+            f2_rare_scorer = make_scorer(fbeta_score, beta=beta, pos_label=pos_label)
+        else:
+            # 기본 F2 스코어
+            f2_rare_scorer = make_scorer(lambda y_true, y_pred: fbeta_score(y_true, y_pred, beta=2, pos_label=1))
+            
+    else:
+        # 기본 하이퍼파라미터 설정
+        param_grid = {
+            "n_estimators": [30, 50, 100, 200],
+            "max_depth": [2, 5],
+            "learning_rate": [0.01, 0.1, 0.2],
+        }
+        scale_pos_weight_multiplier = 2
+        cv = 3
+        verbose = 1
+        f2_rare_scorer = make_scorer(lambda y_true, y_pred: fbeta_score(y_true, y_pred, beta=2, pos_label=1))
+
+    # 설정된 파라미터 정보를 저장합니다.
+    model_parameter_info['param_grid'] = param_grid
+    model_parameter_info['scale_pos_weight_multiplier'] = scale_pos_weight_multiplier
+    model_parameter_info['cv'] = cv
+    model_parameter_info['verbose'] = verbose
+    model_parameter_info['f2_rare_scorer'] = {
+        'name': 'fbeta_score',
+        'beta': f2_rare_scorer._kwargs.get('beta'),
+        'pos_label': f2_rare_scorer._kwargs.get('pos_label')
+    }
+
+    # 클래스 불균형을 위한 'scale_pos_weight'를 계산합니다.
+    n_pos = sum(y)
+    n_neg = len(y) - n_pos
+    scale_pos_weight = n_neg / n_pos * scale_pos_weight_multiplier if n_pos > 0 else 1
+
+    # XGBoost 모델 객체를 생성합니다.
+    xgb_model = XGBClassifier(
+        use_label_encoder=False,
+        eval_metric="logloss",
+        random_state=42,
+        scale_pos_weight=scale_pos_weight,
+    )
+
+    # GridSearchCV를 설정합니다.
+    grid_search = GridSearchCV(
+        estimator=xgb_model,
+        param_grid=param_grid,
+        scoring=f2_rare_scorer,
+        cv=cv,
+        verbose=verbose,
+        n_jobs=-1,
+    )
+
+    grid_search.fit(X, y)
+    best_model = grid_search.best_estimator_
+
+    print(f"\n    Best parameters found: {grid_search.best_params_}")
+    print(f"    Best F2 (class=1) score: {grid_search.best_score_:.4f}\n")
+    
+    model_parameter_info['best_params'] = grid_search.best_params_
+
+    # 최적 모델의 특징 중요도를 계산합니다.
+    importance_dict = {
+        "Features": X.columns,
+        "Importance": best_model.feature_importances_,
+        "Importance_abs": np.abs(best_model.feature_importances_),
+    }
+    importance = pd.DataFrame(importance_dict).sort_values(
+        by="Importance", ascending=True
+    )
+
+    return best_model, importance, model_parameter_info
+
+
+@! 위의 train_model_xgboost_cv 함수의 f2_rare_scorer 관련 부분을 아래 train_model_xgboost_optuna 함수에도 유사하게 적용. 해당 train_parameters도 알맞게 조정.
+
+
+def train_model_xgboost_optuna(train_dataset: pd.DataFrame, feature_selection_info: dict, train_parameters: dict = None):
+    print("    Training the XGBoost model with Optuna hyperparameter tuning...\n")
+    
+    model_parameter_info = {}
+    
+    X, y = train_dataset.iloc[:, :-1], train_dataset.iloc[:, -1]
+    final_features = feature_selection_info['final_features']
+    X = X[final_features]
+    
+    n_pos = sum(y)
+    n_neg = len(y) - n_pos
+
+    # train_parameters에서 Optuna 관련 설정 가져오기
+    if train_parameters and train_parameters.get('function_name') == 'train_model_xgboost_optuna':
+        n_trials = train_parameters.get('n_trials', 30)
+        cv = train_parameters.get('cv', 3)
+        param_ranges = train_parameters.get('param_ranges', {
+            'n_estimators': {'low': 50, 'high': 150},
+            'max_depth': {'low': 3, 'high': 10},
+            'learning_rate': {'low': 0.01, 'high': 0.2},
+            'subsample': {'low': 0.6, 'high': 1.0},
+            'colsample_bytree': {'low': 0.6, 'high': 1.0},
+            'gamma': {'low': 0.0, 'high': 0.2},
+            'reg_alpha': {'low': 1e-8, 'high': 1.0},
+            'reg_lambda': {'low': 1e-8, 'high': 1.0}
+        })
+        # scale_pos_weight는 ratio_multiplier를 사용하여 동적 탐색 가능하도록 보완
+        ratio_multiplier_range = train_parameters.get('ratio_multiplier_range', {'low': 0.5, 'high': 2.0})
+    else:
+        n_trials = 30
+        cv = 3
+        param_ranges = {
+            'n_estimators': {'low': 50, 'high': 150},
+            'max_depth': {'low': 3, 'high': 10},
+            'learning_rate': {'low': 0.01, 'high': 0.2},
+            'subsample': {'low': 0.6, 'high': 1.0},
+            'colsample_bytree': {'low': 0.6, 'high': 1.0},
+            'gamma': {'low': 0.0, 'high': 0.2},
+            'reg_alpha': {'low': 1e-8, 'high': 1.0},
+            'reg_lambda': {'low': 1e-8, 'high': 1.0}
+        }
+        ratio_multiplier_range = {'low': 0.5, 'high': 2.0}
+        
+    model_parameter_info['n_trials'] = n_trials
+    model_parameter_info['cv'] = cv
+    model_parameter_info['param_ranges'] = param_ranges
+    model_parameter_info['ratio_multiplier_range'] = ratio_multiplier_range
+
+    def objective(trial):
+        # Optuna를 위한 파라미터 탐색 범위 설정
+        params = {
+            'n_estimators': trial.suggest_int('n_estimators', param_ranges['n_estimators']['low'], param_ranges['n_estimators']['high']),
+            'max_depth': trial.suggest_int('max_depth', param_ranges['max_depth']['low'], param_ranges['max_depth']['high']),
+            'learning_rate': trial.suggest_float('learning_rate', param_ranges['learning_rate']['low'], param_ranges['learning_rate']['high'], log=True),
+            'subsample': trial.suggest_float('subsample', param_ranges['subsample']['low'], param_ranges['subsample']['high']),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', param_ranges['colsample_bytree']['low'], param_ranges['colsample_bytree']['high']),
+            'gamma': trial.suggest_float('gamma', param_ranges['gamma']['low'], param_ranges['gamma']['high']),
+            'reg_alpha': trial.suggest_float('reg_alpha', param_ranges['reg_alpha']['low'], param_ranges['reg_alpha']['high'], log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', param_ranges['reg_lambda']['low'], param_ranges['reg_lambda']['high'], log=True),
+        }
+
+        # class imbalance를 위한 scale_pos_weight를 탐색
+        base_scale = n_neg / n_pos if n_pos > 0 else 1
+        ratio_multiplier = trial.suggest_float('ratio_multiplier', ratio_multiplier_range['low'], ratio_multiplier_range['high'])
+        scale_pos_weight = base_scale * ratio_multiplier
+        
+        xgb_model = XGBClassifier(
+            use_label_encoder=False,
+            eval_metric="logloss",
+            random_state=42,
+            scale_pos_weight=scale_pos_weight,
+            n_jobs=-1,
+            **params
+        )
+
+        kf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=42)
+        score = cross_val_score(xgb_model, X, y, cv=kf, scoring=f2_rare_scorer, n_jobs=-1).mean()
+        
+        return score
+    
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+    
+    best_params = study.best_params
+    
+    # best_params에서 ratio_multiplier를 분리하여 scale_pos_weight 계산
+    best_ratio_multiplier = best_params.pop('ratio_multiplier')
+    base_scale = n_neg / n_pos if n_pos > 0 else 1
+    best_scale_pos_weight = base_scale * best_ratio_multiplier
+
+    best_model = XGBClassifier(
+        use_label_encoder=False,
+        eval_metric="logloss",
+        random_state=42,
+        scale_pos_weight=best_scale_pos_weight,
+        n_jobs=-1,
+        **best_params
+    ).fit(X, y)
+
+    print(f"\n    Best parameters found (Optuna): {study.best_params}")
+    print(f"    Best F2 (class=1) score (CV): {study.best_value:.4f}\n")
+    
+    model_parameter_info['best_params'] = study.best_params
+    model_parameter_info['best_ratio_multiplier'] = best_ratio_multiplier
+    model_parameter_info['best_scale_pos_weight'] = best_scale_pos_weight
+    
+    importance_dict = {
+        "Features": X.columns,
+        "Importance": best_model.feature_importances_,
+        "Importance_abs": np.abs(best_model.feature_importances_),
+    }
+    importance = pd.DataFrame(importance_dict).sort_values(
+        by="Importance", ascending=True
+    )
+    
+    return best_model, importance, model_parameter_info

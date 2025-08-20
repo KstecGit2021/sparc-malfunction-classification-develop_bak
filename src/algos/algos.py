@@ -1154,7 +1154,7 @@ def train_model_logistic_regression_optuna(train_dataset: pd.DataFrame, feature_
 ##############################################################################################################################
 # Optuna를 사용하여 최적화하는 랜덤 포레스트 모델 훈련 함수
 ##############################################################################################################################
-def train_model_rf_optuna(train_dataset: pd.DataFrame, feature_selection_info: dict, train_parameters: dict = None):
+def train_model_rf_optuna_old(train_dataset: pd.DataFrame, feature_selection_info: dict, train_parameters: dict = None):
     print("      Training the Random Forest model with Optuna hyperparameter tuning...\n")
     
     model_parameter_info = {}
@@ -1252,6 +1252,118 @@ def train_model_rf_optuna(train_dataset: pd.DataFrame, feature_selection_info: d
     
     return best_model, importance, model_parameter_info
 
+def train_model_rf_optuna(train_dataset: pd.DataFrame, feature_selection_info: dict, train_parameters: dict = None):
+    print("      Training the Random Forest model with Optuna hyperparameter tuning...\n")
+    
+    model_parameter_info = {}
+    
+    X, y = train_dataset.iloc[:, :-1], train_dataset.iloc[:, -1]
+    final_features = feature_selection_info['final_features']
+    X = X[final_features]
+    
+    n_neg = len(y) - sum(y)
+
+    # train_parameters에서 Optuna 관련 설정 가져오기
+    if train_parameters and train_parameters.get('function_name') == 'train_model_rf_optuna':
+        n_trials = train_parameters.get('n_trials', 30)
+        cv = train_parameters.get('cv', 3)
+        param_ranges = train_parameters.get('param_ranges', {
+            'n_estimators': {'low': 50, 'high': 150},
+            'max_depth': {'low': 5, 'high': 20},
+            'min_samples_split': {'low': 2, 'high': 10},
+            'min_samples_leaf': {'low': 1, 'high': 5},
+            'max_features': {'choices': ['sqrt', 'log2', 0.8]}
+        })
+        if 'class_weight_multiplier' not in param_ranges:
+            param_ranges['class_weight_multiplier'] = {'low': 1, 'high': n_neg}
+        
+        # f2_rare_scorer 설정 로직 추가
+        scoring_params = train_parameters.get('f2_rare_scorer', {})
+        if scoring_params.get('name') == 'fbeta_score':
+            beta = scoring_params.get('beta', 2)
+            pos_label = scoring_params.get('pos_label', 1)
+            scorer = make_scorer(fbeta_score, beta=beta, pos_label=pos_label)
+        else:
+            scorer = make_scorer(f2_rare_scorer, greater_is_better=True)
+            
+    else:
+        n_trials = 30
+        cv = 3
+        param_ranges = {
+            'n_estimators': {'low': 50, 'high': 150},
+            'max_depth': {'low': 5, 'high': 20},
+            'min_samples_split': {'low': 2, 'high': 10},
+            'min_samples_leaf': {'low': 1, 'high': 5},
+            'max_features': {'choices': ['sqrt', 'log2', 0.8]},
+            'class_weight_multiplier': {'low': 1, 'high': n_neg}
+        }
+        scorer = make_scorer(f2_rare_scorer, greater_is_better=True)
+
+    model_parameter_info['n_trials'] = n_trials
+    model_parameter_info['cv'] = cv
+    model_parameter_info['param_ranges'] = param_ranges
+    if 'f2_rare_scorer' in locals():
+        model_parameter_info['f2_rare_scorer'] = {
+            'name': 'fbeta_score',
+            'beta': scorer._kwargs.get('beta'),
+            'pos_label': scorer._kwargs.get('pos_label')
+        }
+
+    def objective(trial):
+        params = {
+            'n_estimators': trial.suggest_int('n_estimators', param_ranges['n_estimators']['low'], param_ranges['n_estimators']['high']),
+            'max_depth': trial.suggest_int('max_depth', param_ranges['max_depth']['low'], param_ranges['max_depth']['high']),
+            'min_samples_split': trial.suggest_int('min_samples_split', param_ranges['min_samples_split']['low'], param_ranges['min_samples_split']['high']),
+            'min_samples_leaf': trial.suggest_int('min_samples_leaf', param_ranges['min_samples_leaf']['low'], param_ranges['min_samples_leaf']['high']),
+            'max_features': trial.suggest_categorical('max_features', param_ranges['max_features']['choices']),
+            'class_weight_multiplier': trial.suggest_int('class_weight_multiplier', param_ranges['class_weight_multiplier']['low'], param_ranges['class_weight_multiplier']['high'])
+        }
+
+        class_weight = {0: 1, 1: params.pop('class_weight_multiplier')}
+        
+        rf_model = RandomForestClassifier(
+            class_weight=class_weight,
+            random_state=42,
+            n_jobs=-1,
+            **params
+        )
+
+        kf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=42)
+        score = cross_val_score(rf_model, X, y, cv=kf, scoring=scorer, n_jobs=-1).mean()
+        
+        return score
+
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+    
+    best_params = study.best_params
+    best_class_weight_multiplier = best_params.pop('class_weight_multiplier')
+    best_class_weight = {0: 1, 1: best_class_weight_multiplier}
+
+    best_model = RandomForestClassifier(
+        class_weight=best_class_weight,
+        random_state=42,
+        n_jobs=-1,
+        **best_params
+    ).fit(X, y)
+
+    print(f"\n      Best parameters found (Optuna): {study.best_params}")
+    print(f"      Best F2 (class=1) score (CV): {study.best_value:.4f}\n")
+    
+    model_parameter_info['best_params'] = study.best_params
+    model_parameter_info['best_class_weight_multiplier'] = best_class_weight_multiplier
+
+    importance_dict = {
+        "Features": X.columns,
+        "Importance": best_model.feature_importances_,
+        "Importance_abs": np.abs(best_model.feature_importances_),
+    }
+    importance = pd.DataFrame(importance_dict).sort_values(
+        by="Importance", ascending=True
+    )
+    
+    return best_model, importance, model_parameter_info
+
 
 ##############################################################################################################################
 # Optuna를 사용하여 최적화하는 XGBoost 모델 훈련 함수
@@ -1330,7 +1442,7 @@ def train_model_xgboost_optuna_old(train_dataset: pd.DataFrame, feature_selectio
     
     return best_model, importance, model_parameter_info
 
-def train_model_xgboost_optuna(train_dataset: pd.DataFrame, feature_selection_info: dict, train_parameters: dict = None):
+def train_model_xgboost_optuna_old2(train_dataset: pd.DataFrame, feature_selection_info: dict, train_parameters: dict = None):
     print("    Training the XGBoost model with Optuna hyperparameter tuning...\n")
     
     model_parameter_info = {}
@@ -1377,6 +1489,141 @@ def train_model_xgboost_optuna(train_dataset: pd.DataFrame, feature_selection_in
     model_parameter_info['cv'] = cv
     model_parameter_info['param_ranges'] = param_ranges
     model_parameter_info['ratio_multiplier_range'] = ratio_multiplier_range
+
+    def objective(trial):
+        # Optuna를 위한 파라미터 탐색 범위 설정
+        params = {
+            'n_estimators': trial.suggest_int('n_estimators', param_ranges['n_estimators']['low'], param_ranges['n_estimators']['high']),
+            'max_depth': trial.suggest_int('max_depth', param_ranges['max_depth']['low'], param_ranges['max_depth']['high']),
+            'learning_rate': trial.suggest_float('learning_rate', param_ranges['learning_rate']['low'], param_ranges['learning_rate']['high'], log=True),
+            'subsample': trial.suggest_float('subsample', param_ranges['subsample']['low'], param_ranges['subsample']['high']),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', param_ranges['colsample_bytree']['low'], param_ranges['colsample_bytree']['high']),
+            'gamma': trial.suggest_float('gamma', param_ranges['gamma']['low'], param_ranges['gamma']['high']),
+            'reg_alpha': trial.suggest_float('reg_alpha', param_ranges['reg_alpha']['low'], param_ranges['reg_alpha']['high'], log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', param_ranges['reg_lambda']['low'], param_ranges['reg_lambda']['high'], log=True),
+        }
+
+        # class imbalance를 위한 scale_pos_weight를 탐색
+        base_scale = n_neg / n_pos if n_pos > 0 else 1
+        ratio_multiplier = trial.suggest_float('ratio_multiplier', ratio_multiplier_range['low'], ratio_multiplier_range['high'])
+        scale_pos_weight = base_scale * ratio_multiplier
+        
+        xgb_model = XGBClassifier(
+            use_label_encoder=False,
+            eval_metric="logloss",
+            random_state=42,
+            scale_pos_weight=scale_pos_weight,
+            n_jobs=-1,
+            **params
+        )
+
+        kf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=42)
+        score = cross_val_score(xgb_model, X, y, cv=kf, scoring=f2_rare_scorer, n_jobs=-1).mean()
+        
+        return score
+    
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+    
+    best_params = study.best_params
+    
+    # best_params에서 ratio_multiplier를 분리하여 scale_pos_weight 계산
+    best_ratio_multiplier = best_params.pop('ratio_multiplier')
+    base_scale = n_neg / n_pos if n_pos > 0 else 1
+    best_scale_pos_weight = base_scale * best_ratio_multiplier
+
+    best_model = XGBClassifier(
+        use_label_encoder=False,
+        eval_metric="logloss",
+        random_state=42,
+        scale_pos_weight=best_scale_pos_weight,
+        n_jobs=-1,
+        **best_params
+    ).fit(X, y)
+
+    print(f"\n    Best parameters found (Optuna): {study.best_params}")
+    print(f"    Best F2 (class=1) score (CV): {study.best_value:.4f}\n")
+    
+    model_parameter_info['best_params'] = study.best_params
+    model_parameter_info['best_ratio_multiplier'] = best_ratio_multiplier
+    model_parameter_info['best_scale_pos_weight'] = best_scale_pos_weight
+    
+    importance_dict = {
+        "Features": X.columns,
+        "Importance": best_model.feature_importances_,
+        "Importance_abs": np.abs(best_model.feature_importances_),
+    }
+    importance = pd.DataFrame(importance_dict).sort_values(
+        by="Importance", ascending=True
+    )
+    
+    return best_model, importance, model_parameter_info
+
+def train_model_xgboost_optuna(train_dataset: pd.DataFrame, feature_selection_info: dict, train_parameters: dict = None):
+    print("    Training the XGBoost model with Optuna hyperparameter tuning...\n")
+    
+    model_parameter_info = {}
+    
+    X, y = train_dataset.iloc[:, :-1], train_dataset.iloc[:, -1]
+    final_features = feature_selection_info['final_features']
+    X = X[final_features]
+    
+    n_pos = sum(y)
+    n_neg = len(y) - n_pos
+
+    # train_parameters에서 Optuna 관련 설정 가져오기
+    if train_parameters and train_parameters.get('function_name') == 'train_model_xgboost_optuna':
+        n_trials = train_parameters.get('n_trials', 30)
+        cv = train_parameters.get('cv', 3)
+        param_ranges = train_parameters.get('param_ranges', {
+            'n_estimators': {'low': 50, 'high': 150},
+            'max_depth': {'low': 3, 'high': 10},
+            'learning_rate': {'low': 0.01, 'high': 0.2},
+            'subsample': {'low': 0.6, 'high': 1.0},
+            'colsample_bytree': {'low': 0.6, 'high': 1.0},
+            'gamma': {'low': 0.0, 'high': 0.2},
+            'reg_alpha': {'low': 1e-8, 'high': 1.0},
+            'reg_lambda': {'low': 1e-8, 'high': 1.0}
+        })
+        # scale_pos_weight는 ratio_multiplier를 사용하여 동적 탐색 가능하도록 보완
+        ratio_multiplier_range = train_parameters.get('ratio_multiplier_range', {'low': 0.5, 'high': 2.0})
+
+        # f2_rare_scorer 설정 로직 반영
+        scoring_params = train_parameters.get('f2_rare_scorer', {})
+        if scoring_params.get('name') == 'fbeta_score':
+            beta = scoring_params.get('beta', 2)
+            pos_label = scoring_params.get('pos_label', 1)
+            f2_rare_scorer = make_scorer(fbeta_score, beta=beta, pos_label=pos_label)
+        else:
+            # 기본 F2 스코어
+            f2_rare_scorer = make_scorer(lambda y_true, y_pred: fbeta_score(y_true, y_pred, beta=2, pos_label=1))
+            
+    else:
+        n_trials = 30
+        cv = 3
+        param_ranges = {
+            'n_estimators': {'low': 50, 'high': 150},
+            'max_depth': {'low': 3, 'high': 10},
+            'learning_rate': {'low': 0.01, 'high': 0.2},
+            'subsample': {'low': 0.6, 'high': 1.0},
+            'colsample_bytree': {'low': 0.6, 'high': 1.0},
+            'gamma': {'low': 0.0, 'high': 0.2},
+            'reg_alpha': {'low': 1e-8, 'high': 1.0},
+            'reg_lambda': {'low': 1e-8, 'high': 1.0}
+        }
+        ratio_multiplier_range = {'low': 0.5, 'high': 2.0}
+        f2_rare_scorer = make_scorer(lambda y_true, y_pred: fbeta_score(y_true, y_pred, beta=2, pos_label=1))
+        
+    model_parameter_info['n_trials'] = n_trials
+    model_parameter_info['cv'] = cv
+    model_parameter_info['param_ranges'] = param_ranges
+    model_parameter_info['ratio_multiplier_range'] = ratio_multiplier_range
+    model_parameter_info['f2_rare_scorer'] = {
+        'name': 'fbeta_score',
+        'beta': f2_rare_scorer._kwargs.get('beta'),
+        'pos_label': f2_rare_scorer._kwargs.get('pos_label')
+    }
+
 
     def objective(trial):
         # Optuna를 위한 파라미터 탐색 범위 설정
