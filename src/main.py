@@ -60,6 +60,7 @@ if __name__ == "__main__":
     train_dataset = scenario.train_dataset.read()
     test_dataset = scenario.test_dataset.read()
     roc_dataset = scenario.roc_data_random_forest.read()
+    # roc_dataset = scenario.roc_data_logistic_regression.read()
 
     # Process test dataset columns
     test_dataset.columns = [str(column).upper() for column in test_dataset.columns]
