@@ -263,6 +263,7 @@ train_parameters_list_default = \
                                                                        'low': 0.8}}
              }
  }
+
 train_parameters_list_default_cfg = Config.configure_data_node(
     id="train_parameters_list_default", storage_type="json",  default_data=train_parameters_list_default
 )
