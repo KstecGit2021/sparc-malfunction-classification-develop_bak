@@ -22,7 +22,7 @@ preprocessed_dataset_cfg = Config.configure_data_node(id="preprocessed_dataset")
 train_dataset_cfg = Config.configure_data_node(id="train_dataset")
 test_dataset_cfg = Config.configure_data_node(id="test_dataset")
 
-feature_selector_default = \
+feature_selector_default_old = \
 {
     "feature_selector_name": "CorrelationsClassifier",
     "f2_scorer": {
@@ -40,6 +40,29 @@ feature_selector_default = \
         "threshold": 0.09
     }
 }
+
+feature_selector_default = \
+{
+    "feature_selector_name": "CorrelationsClassifier_New",  # 피처 선택기 이름 정의 (식별용)
+    "filter_methods": {  # 모든 필터링 기법과 파라미터를 포함
+        "variance_threshold": {  # 분산 필터링 설정
+            "threshold": 0.0  # 분산이 이 값 이하인 피처 제거 (모든 값이 동일한 피처 포함)
+        },
+        "target_correlation_filter": {  # 타겟과의 선형 상관관계 필터링 설정
+            "threshold": 0.01  # 타겟과의 절대 상관관계가 이 값 미만인 피처 제거
+        },
+        "target_xicor_filter": {  # 타겟과의 비선형 상관관계 필터링 설정
+            "threshold": 0.05  # 타겟과의 Xi Cor 값이 이 값 미만인 피처 제거
+        },
+        "feature_correlation_filter": {  # 피처 간 선형 상관관계 필터링 설정
+            "threshold": 0.98  # 피처 간 절대 상관관계가 이 값 초과 시, 둘 중 하나 제거
+        },
+        "xicor_correlation_filter": {  # 피처 간 비선형 상관관계 필터링 설정
+            "threshold": 0.9  # 피처 간 Xi Cor 값이 이 값 초과 시, 둘 중 하나 제거
+        }
+    }
+}
+
 
 feature_selector_default_cfg = Config.configure_data_node(id="feature_selector_default", storage_type="json", default_data=feature_selector_default)
 feature_selector_cfg = Config.configure_data_node(id="feature_selector", storage_type="json", default_data=feature_selector_default)
@@ -61,7 +84,7 @@ split_parameter_default = \
         'test_size': 0.2,
         'random_state': 42,
         # create_train_test_data에서 직접 적용되는 필터
-        'apply_filter_split': True,
+        'apply_filter_split': False,
         'var_threshold_split': 0.0,
         'corr_threshold_split': 0.98,
         
@@ -74,7 +97,7 @@ split_parameter_default = \
         'poly_degree': 2,
 
         # feature_generator 내부에서 적용되는 필터
-        'apply_filter_gen': True,
+        'apply_filter_gen': False,
         'var_threshold_gen': 0.0,
         'corr_threshold_gen': 0.1,
     }

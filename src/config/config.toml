@@ -340,15 +340,15 @@ tasks = [ "preprocess_dataset:SECTION", "create_train_and_test_data:SECTION", "s
 additional_data_nodes = [ "train_parameters_list_default:SECTION", "feature_selector_default:SECTION",]
 
 [DATA_NODE.feature_selector_default.default_data]
-feature_selector_name = "CorrelationsClassifier"
+feature_selector_name = "CorrelationsClassifier_New"
 
 [DATA_NODE.feature_selector.default_data]
-feature_selector_name = "CorrelationsClassifier"
+feature_selector_name = "CorrelationsClassifier_New"
 
 [DATA_NODE.split_parameter.default_data]
 test_size = "0.2:float"
 random_state = "42:int"
-apply_filter_split = "True:bool"
+apply_filter_split = "False:bool"
 var_threshold_split = "0.0:float"
 corr_threshold_split = "0.98:float"
 apply_feature_generation = "False:bool"
@@ -356,7 +356,7 @@ sum_features = "True:bool"
 diff_features = "True:bool"
 poly_features = "True:bool"
 poly_degree = "2:int"
-apply_filter_gen = "True:bool"
+apply_filter_gen = "False:bool"
 var_threshold_gen = "0.0:float"
 corr_threshold_gen = "0.1:float"
 
@@ -384,28 +384,6 @@ change_threshold_baseline = [ "task_create_results_baseline:SECTION", "task_crea
 change_threshold_logistic_regression = [ "task_create_results_logistic_regression:SECTION", "task_create_metrics_logistic_regression:SECTION", "create_metrics_on_train_logistic_regression:SECTION",]
 change_threshold_random_forest = [ "task_create_results_random_forest:SECTION", "task_create_metrics_random_forest:SECTION", "create_metrics_on_train_random_forest:SECTION",]
 change_threshold_xgboost = [ "task_create_results_xgboost:SECTION", "task_create_metrics_xgboost:SECTION", "create_metrics_on_train_xgboost:SECTION",]
-
-[DATA_NODE.feature_selector_default.default_data.f2_scorer]
-name = "fbeta_score"
-beta = "4:int"
-pos_label = "1:int"
-
-[DATA_NODE.feature_selector_default.default_data.variance_threshold_filter]
-threshold = "0:int"
-
-[DATA_NODE.feature_selector_default.default_data.correlation_filter]
-threshold = "0.09:float"
-
-[DATA_NODE.feature_selector.default_data.f2_scorer]
-name = "fbeta_score"
-beta = "4:int"
-pos_label = "1:int"
-
-[DATA_NODE.feature_selector.default_data.variance_threshold_filter]
-threshold = "0:int"
-
-[DATA_NODE.feature_selector.default_data.correlation_filter]
-threshold = "0.09:float"
 
 [DATA_NODE.train_parameters_list_default.default_data.baseline]
 function_name = "train_model_baseline"
@@ -478,6 +456,36 @@ pos_label = "1:int"
 [DATA_NODE.train_parameters_xgboost.default_data.ratio_multiplier_range]
 high = "1.2:float"
 low = "0.8:float"
+
+[DATA_NODE.feature_selector_default.default_data.filter_methods.variance_threshold]
+threshold = "0.0:float"
+
+[DATA_NODE.feature_selector_default.default_data.filter_methods.target_correlation_filter]
+threshold = "0.01:float"
+
+[DATA_NODE.feature_selector_default.default_data.filter_methods.target_xicor_filter]
+threshold = "0.05:float"
+
+[DATA_NODE.feature_selector_default.default_data.filter_methods.feature_correlation_filter]
+threshold = "0.98:float"
+
+[DATA_NODE.feature_selector_default.default_data.filter_methods.xicor_correlation_filter]
+threshold = "0.9:float"
+
+[DATA_NODE.feature_selector.default_data.filter_methods.variance_threshold]
+threshold = "0.0:float"
+
+[DATA_NODE.feature_selector.default_data.filter_methods.target_correlation_filter]
+threshold = "0.01:float"
+
+[DATA_NODE.feature_selector.default_data.filter_methods.target_xicor_filter]
+threshold = "0.05:float"
+
+[DATA_NODE.feature_selector.default_data.filter_methods.feature_correlation_filter]
+threshold = "0.98:float"
+
+[DATA_NODE.feature_selector.default_data.filter_methods.xicor_correlation_filter]
+threshold = "0.9:float"
 
 [DATA_NODE.train_parameters_list_default.default_data.baseline.importance_data]
 Features = [ "SensorOffsetHot-Cold", "band gap dpat_ok for band gap", "Radius",]
