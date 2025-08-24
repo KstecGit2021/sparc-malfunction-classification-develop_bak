@@ -110,7 +110,7 @@ feature_selector_params_default = \
     "filter_methods": {
         "apply_variance_filter": True,
         "var_threshold": 0.01,
-        "apply_target_linear_corr_filter": True,
+        "apply_target_linear_corr_filter": False,
         "target_linear_corr_threshold": 0.05,
         "apply_target_xicor_filter": False,
         "target_xicor_threshold": 0.0,

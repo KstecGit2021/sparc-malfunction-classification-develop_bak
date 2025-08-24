@@ -1431,6 +1431,58 @@ def feature_filter(X: pd.DataFrame, y: pd.Series, params: Dict) -> Tuple[pd.Data
     final_cols = list(X_filtered.columns)
     return X_filtered, final_cols, filter_stats
 
+# --- 통합 필터링 워크플로 함수명 변경 ---
+def feature_filter_new(X: pd.DataFrame, y: pd.Series, params: Dict) -> Tuple[pd.DataFrame, list, Dict]:
+    X_filtered = X.copy()
+    filter_stats = {}
+    print("\n--- 피처 필터링 시작 ---")
+    
+    # params 딕셔너리 내의 'filter_methods' 키를 안전하게 가져옴. 없으면 빈 딕셔너리({})를 사용.
+    filter_methods_params = params.get('filter_methods', {})
+
+    # 1. 분산 필터링
+    # 'apply_variance_filter' 키가 존재하고 값이 True일 경우에만 실행
+    # 키가 없거나 값이 None, False인 경우 이 조건문은 False가 됨
+    if filter_methods_params.get('apply_variance_filter', True):
+        var_threshold = filter_methods_params.get('var_threshold')
+        # var_threshold 값이 None이 아닐 경우에만 필터링 실행
+        if var_threshold is not None:
+            X_filtered, stats = filter_by_variance(X_filtered, var_threshold)
+            filter_stats['variance'] = stats
+
+    # 2. 타겟과의 선형 상관관계 필터링
+    if filter_methods_params.get('apply_target_linear_corr_filter', True) and X_filtered.shape[1] > 0:
+        target_linear_corr_threshold = filter_methods_params.get('target_linear_corr_threshold')
+        if target_linear_corr_threshold is not None:
+            X_filtered, stats = filter_by_target_linear_correlation(X_filtered, y, target_linear_corr_threshold)
+            filter_stats['target_linear_correlation'] = stats
+
+    # 3. 타겟과의 비선형 상관관계 (Xi Cor) 필터링
+    if filter_methods_params.get('apply_target_xicor_filter', True) and X_filtered.shape[1] > 0:
+        target_xicor_threshold = filter_methods_params.get('target_xicor_threshold')
+        if target_xicor_threshold is not None:
+            X_filtered, stats = filter_by_target_xicor_correlation(X_filtered, y, target_xicor_threshold)
+            filter_stats['target_xicor_correlation'] = stats
+
+    # 4. 피처 간 선형 상관관계 필터링
+    if filter_methods_params.get('apply_feature_linear_corr_filter', True) and X_filtered.shape[1] > 1:
+        feature_linear_corr_threshold = filter_methods_params.get('feature_linear_corr_threshold')
+        if feature_linear_corr_threshold is not None:
+            X_filtered, stats = filter_by_feature_linear_correlation(X_filtered, feature_linear_corr_threshold)
+            filter_stats['feature_linear_correlation'] = stats
+
+    # 5. 피처 간 비선형 상관관계 (Xi Cor) 필터링
+    if filter_methods_params.get('apply_feature_xicor_filter', True) and X_filtered.shape[1] > 1:
+        feature_xicor_threshold = filter_methods_params.get('feature_xicor_threshold')
+        if feature_xicor_threshold is not None:
+            X_filtered, stats = filter_by_feature_xicor_correlation(X_filtered, feature_xicor_threshold)
+            filter_stats['feature_xicor_correlation'] = stats
+            
+    final_cols = list(X_filtered.columns)
+    print("\n--- 피처 필터링 완료 ---")
+    return X_filtered, final_cols, filter_stats
+
+
 def select_feature_old(test_data, train_data, feature_selector):
 
     # X를 분리한 다음 필터링합니다.

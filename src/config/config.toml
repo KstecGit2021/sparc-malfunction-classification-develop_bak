@@ -415,7 +415,7 @@ threshold = "median"
 [DATA_NODE.feature_selector.default_data.filter_methods]
 apply_variance_filter = "True:bool"
 var_threshold = "0.01:float"
-apply_target_linear_corr_filter = "True:bool"
+apply_target_linear_corr_filter = "False:bool"
 target_linear_corr_threshold = "0.05:float"
 apply_target_xicor_filter = "False:bool"
 target_xicor_threshold = "0.0:float"
