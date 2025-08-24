@@ -5,8 +5,7 @@ from sklearn.ensemble import RandomForestClassifier         # 랜덤 포레스�
 from sklearn.model_selection import train_test_split, GridSearchCV # 데이터 분할 및 하이퍼파라미터 튜닝을 위한 도구
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.datasets import make_classification
-from sklearn.feature_selection import SelectFromModel
-from sklearn.feature_selection import SelectKBest, VarianceThreshold, f_classif # 특징(변수) 선택을 위한 도구
+from sklearn.feature_selection import SelectFromModel, SelectKBest, VarianceThreshold, f_classif # 특징(변수) 선택을 위한 도구
 
 from sklearn.tree import DecisionTreeClassifier             # 의사결정나무 모델
 from sklearn.metrics import roc_auc_score, fbeta_score, make_scorer, precision_score # 모델 성능 평가 지표
@@ -34,8 +33,13 @@ from imblearn.over_sampling import SMOTE
 from imblearn.under_sampling import RandomUnderSampler
 from collections import Counter
 
-from datetime import datetime
 import uuid
+
+import os
+import shutil
+
+from typing import Dict, List, Tuple
+
 
 ##############################################################################################################################
 # 1) Baseline Model (Unchanged in logic) but keep in mind: it returns proba[:,1] as "pass"
@@ -594,7 +598,6 @@ from sklearn.feature_selection import SelectFromModel
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import VarianceThreshold
 import json
-from datetime import datetime
 import uuid
 from numpy import array, random, arange
 
@@ -764,8 +767,8 @@ def variance_correlation_filter_old3(
 
     return X_filtered_final, final_cols, features_dropped_by_variance, features_dropped_by_corr, features_dropped_by_xicor, var_dropped_features, corr_dropped_features, xicor_dropped_features
 
-# --- 보완된 분산 및 상관관계 필터 함수 ---
-def variance_correlation_filter(
+# --- 보완된 분산 및 상관관계 필터 함수 ---  -> feature_filter 로 변경
+def variance_correlation_filter_old4(
     X: pd.DataFrame, y: pd.Series, var_threshold=0.0, target_linear_corr_threshold=0.01, target_xicor_threshold=0.05, feature_linear_corr_threshold=0.98, feature_xicor_threshold=0.9
 ):
     """
@@ -870,125 +873,563 @@ def variance_correlation_filter(
 
     return X_df_xicor_feature, final_cols, stats
 
-def perform_feature_selection_workflow(feature_selection_params, X, y):
-    """
-    단계별 파라미터 딕셔너리를 사용하여 피처 선택 워크플로를 수행하고 결과를 JSON 파일로 저장합니다.
-    """
-    # # 1. 샘플 데이터 생성
-    # X, y = make_classification(
-    #     n_samples=1000,
-    #     n_features=200,
-    #     n_informative=100,
-    #     n_redundant=10,
-    #     n_repeated=5,
-    #     n_classes=2,
-    #     random_state=42
-    # )
-    # discrete_feature_indices = np.random.choice(
-    #     X.shape[1], 50, replace=False
-    # )
-    # X[:, discrete_feature_indices] = np.round(X[:, discrete_feature_indices])
 
-    # feature_names = [f'feature_{i}' for i in range(X.shape[1])]
-    # df = pd.DataFrame(X, columns=feature_names)
-    # df['target'] = y
+# --- 필터링 단계별 모듈화 함수 ---
+# def filter_by_variance(X: pd.DataFrame, var_threshold: float) -> Tuple[pd.DataFrame, Dict]:
+#     initial_cols = list(X.columns)
+#     vt = VarianceThreshold(threshold=var_threshold)
+#     X_filtered = vt.fit_transform(X)
+#     vt_mask = vt.get_support()
+#     vt_cols = X.columns[vt_mask]
+#     dropped_features = [col for col in initial_cols if col not in vt_cols]
+#     var_values = X[dropped_features].var().to_dict()
+#     stats = {
+#         'threshold_value': var_threshold,
+#         'original_count': len(initial_cols),
+#         'remaining_count': len(vt_cols),
+#         'dropped_features': dropped_features,
+#         'dropped_values': var_values
+#     }
+#     print(f"    - 분산 필터링 후 남은 피처 수: {stats['remaining_count']}")
+#     return pd.DataFrame(X_filtered, columns=vt_cols, index=X.index), stats
 
-    # print("원본 데이터셋의 피처 개수:", df.shape[1] - 1)
+# def filter_by_target_linear_correlation(X: pd.DataFrame, y: pd.Series, threshold: float) -> Tuple[pd.DataFrame, Dict]:
+#     correlations = X.corrwith(y).abs()
+#     low_corr_features = correlations[correlations < threshold].index.tolist()
+#     X_filtered = X.drop(columns=low_corr_features)
+#     dropped_values = correlations.loc[low_corr_features].to_dict()
+#     stats = {
+#         'threshold_value': threshold,
+#         'original_count': X.shape[1],
+#         'remaining_count': X_filtered.shape[1],
+#         'dropped_features': low_corr_features,
+#         'dropped_values': dropped_values
+#     }
+#     print(f"    - 타겟 선형 상관관계 필터링 후 남은 피처 수: {stats['remaining_count']}")
+#     return X_filtered, stats
+
+# def filter_by_target_xicor_correlation(X: pd.DataFrame, y: pd.Series, threshold: float) -> Tuple[pd.DataFrame, Dict]:
+#     to_drop = []
+#     dropped_values = {}
+#     initial_cols = list(X.columns)
+#     for col in initial_cols:
+#         xi_corr_val = xicor(X[col].values, y.values)
+#         if abs(xi_corr_val) <= threshold:
+#             to_drop.append(col)
+#             dropped_values[col] = xi_corr_val
+#     X_filtered = X.drop(columns=to_drop)
+#     stats = {
+#         'threshold_value': threshold,
+#         'original_count': X.shape[1],
+#         'remaining_count': X_filtered.shape[1],
+#         'dropped_features': to_drop,
+#         'dropped_values': dropped_values
+#     }
+#     print(f"    - 타겟 Xi Cor 필터링 후 남은 피처 수: {stats['remaining_count']}")
+#     return X_filtered, stats
+
+# def filter_by_feature_linear_correlation(X: pd.DataFrame, threshold: float) -> Tuple[pd.DataFrame, Dict]:
+#     to_drop = []
+#     dropped_values = {}
+#     initial_cols = list(X.columns)
+#     if len(initial_cols) > 1:
+#         corr_matrix = X.corr().abs()
+#         upper = corr_matrix.where(np.triu(np.ones_like(corr_matrix, dtype=bool), k=1))
+#         to_drop = [col for col in upper.columns if any(upper[col] > threshold)]
+#         for col in to_drop:
+#             related_cols = upper.index[upper[col] > threshold]
+#             for related_col in related_cols:
+#                 pair = tuple(sorted((col, related_col)))
+#                 if str(pair) not in dropped_values:
+#                     dropped_values[str(pair)] = upper.loc[related_col, col]
+#         X_filtered = X.drop(columns=to_drop)
+#     else:
+#         X_filtered = X
+#     stats = {
+#         'threshold_value': threshold,
+#         'original_count': X.shape[1],
+#         'remaining_count': X_filtered.shape[1],
+#         'dropped_features': to_drop,
+#         'dropped_values': dropped_values
+#     }
+#     print(f"    - 피처 간 선형 상관관계 필터링 후 남은 피처 수: {stats['remaining_count']}")
+#     return X_filtered, stats
+
+# def filter_by_feature_xicor_correlation(X: pd.DataFrame, threshold: float) -> Tuple[pd.DataFrame, Dict]:
+#     to_drop = []
+#     dropped_values = {}
+#     initial_cols = list(X.columns)
+#     if len(initial_cols) > 1:
+#         for i in range(len(initial_cols)):
+#             for j in range(i + 1, len(initial_cols)):
+#                 col1 = initial_cols[i]
+#                 col2 = initial_cols[j]
+#                 if col1 in to_drop or col2 in to_drop:
+#                     continue
+#                 xi_corr_val = xicor(X[col1].values, X[col2].values)
+#                 if xi_corr_val > threshold:
+#                     to_drop.append(col2)
+#                     dropped_values[str(tuple(sorted((col1, col2))))] = xi_corr_val
+#         X_filtered = X.drop(columns=to_drop, axis=1)
+#     else:
+#         X_filtered = X
+#     stats = {
+#         'threshold_value': threshold,
+#         'original_count': X.shape[1],
+#         'remaining_count': X_filtered.shape[1],
+#         'dropped_features': to_drop,
+#         'dropped_values': dropped_values
+#     }
+#     print(f"    - 피처 간 비선형 상관관계 필터링 후 남은 피처 수: {stats['remaining_count']}")
+#     return X_filtered, stats
+
+# --- 필터링 단계별 모듈화 함수 ---
+# def filter_by_variance(X: pd.DataFrame, var_threshold: float) -> Tuple[pd.DataFrame, Dict]:
+#     start_time = dt.datetime.now()
     
-    # 2. 필터 방법 (Filter Method) - Variance & Correlation & Xi Cor Filter
-    vc_params = feature_selection_params.get('variance_correlation_filter', {})
+#     initial_cols = list(X.columns)
+#     vt = VarianceThreshold(threshold=var_threshold)
+#     X_filtered = vt.fit_transform(X)
+#     vt_mask = vt.get_support()
+#     vt_cols = X.columns[vt_mask]
+#     dropped_features = [col for col in initial_cols if col not in vt_cols]
+#     var_values = X[dropped_features].var().to_dict()
     
-    X_filtered_vc, vc_features, var_dropped, corr_dropped, xicor_dropped = variance_correlation_filter(
-        X=df.iloc[:, :-1],
-        var_threshold=vc_params.get('var_threshold', 0.0),
-        corr_threshold=vc_params.get('corr_threshold', 0.98),
-        xicor_threshold=vc_params.get('xicor_threshold', 0.9)
-    )
+#     end_time = dt.datetime.now()
+#     duration = end_time - start_time
+#     duration_str = str(duration).split('.')[0]
     
-    # 3. 임베디드 방법 (Embedded Method) - RandomForestClassifier + SelectFromModel
-    sfm_params = feature_selection_params.get('select_from_model', {})
-    rf_params = sfm_params.get('random_forest', {})
+#     stats = {
+#         'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S'),
+#         'end_time': end_time.strftime('%Y-%m-%d %H:%M:%S'),
+#         'duration': duration_str,
+#         'threshold_value': var_threshold,
+#         'original_count': len(initial_cols),
+#         'remaining_count': len(vt_cols),
+#         'dropped_features': dropped_features,
+#         'dropped_values': var_values
+#     }
+#     print(f"    - 분산 필터링 후 남은 피처 수: {stats['remaining_count']}")
+#     return pd.DataFrame(X_filtered, columns=vt_cols, index=X.index), stats
+
+# def filter_by_target_linear_correlation(X: pd.DataFrame, y: pd.Series, threshold: float) -> Tuple[pd.DataFrame, Dict]:
+#     start_time = dt.datetime.now()
     
-    X_train, _, y_train, _ = train_test_split(
-        X_filtered_vc.values, y, test_size=0.3, random_state=42
-    )
+#     correlations = X.corrwith(y).abs()
+#     low_corr_features = correlations[correlations < threshold].index.tolist()
+#     X_filtered = X.drop(columns=low_corr_features)
+#     dropped_values = correlations.loc[low_corr_features].to_dict()
     
-    model = RandomForestClassifier(
-        n_estimators=rf_params.get('n_estimators', 100),
-        max_depth=rf_params.get('max_depth', None),
-        random_state=42,
-        n_jobs=-1
-    )
-    model.fit(X_train, y_train)
+#     end_time = dt.datetime.now()
+#     duration = end_time - start_time
+#     duration_str = str(duration).split('.')[0]
     
-    sfm = SelectFromModel(
-        model, 
-        prefit=True, 
-        threshold=sfm_params.get('threshold', 'mean')
-    )
-    X_selected_sfm = sfm.transform(X_filtered_vc.values)
+#     stats = {
+#         'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S'),
+#         'end_time': end_time.strftime('%Y-%m-%d %H:%M:%S'),
+#         'duration': duration_str,
+#         'threshold_value': threshold,
+#         'original_count': X.shape[1],
+#         'remaining_count': X_filtered.shape[1],
+#         'dropped_features': low_corr_features,
+#         'dropped_values': dropped_values
+#     }
+#     print(f"    - 타겟 선형 상관관계 필터링 후 남은 피처 수: {stats['remaining_count']}")
+#     return X_filtered, stats
+
+# def filter_by_target_xicor_correlation(X: pd.DataFrame, y: pd.Series, threshold: float) -> Tuple[pd.DataFrame, Dict]:
+#     start_time = dt.datetime.now()
     
-    sfm_mask = sfm.get_support(indices=True)
-    selected_features = [vc_features[i] for i in sfm_mask]
+#     to_drop = []
+#     dropped_values = {}
+#     initial_cols = list(X.columns)
+#     for col in initial_cols:
+#         xi_corr_val = xicor(X[col].values, y.values)
+#         if abs(xi_corr_val) <= threshold:
+#             to_drop.append(col)
+#             dropped_values[col] = xi_corr_val
+#     X_filtered = X.drop(columns=to_drop)
     
-    print("SelectFromModel 적용 후 최종 피처 개수:", len(selected_features))
+#     end_time = dt.datetime.now()
+#     duration = end_time - start_time
+#     duration_str = str(duration).split('.')[0]
     
-    # 4. 필터링 결과 및 정보 저장
-    current_time = datetime.now()
-    file_id = uuid.uuid4().hex[:8]
-    filename = current_time.strftime('%y%m%d_%H%M%S') + f'_{file_id}.json'
+#     stats = {
+#         'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S'),
+#         'end_time': end_time.strftime('%Y-%m-%d %H:%M:%S'),
+#         'duration': duration_str,
+#         'threshold_value': threshold,
+#         'original_count': X.shape[1],
+#         'remaining_count': X_filtered.shape[1],
+#         'dropped_features': to_drop,
+#         'dropped_values': dropped_values
+#     }
+#     print(f"    - 타겟 Xi Cor 필터링 후 남은 피처 수: {stats['remaining_count']}")
+#     return X_filtered, stats
+
+# def filter_by_feature_linear_correlation(X: pd.DataFrame, threshold: float) -> Tuple[pd.DataFrame, Dict]:
+#     start_time = dt.datetime.now()
     
-    filtering_info = {
-        "timestamp": current_time.strftime('%Y-%m-%d %H:%M:%S'),
-        "final_feature_count": len(selected_features),
-        "selected_features": selected_features,
-        "workflow_steps": [
-            {
-                "step": "1. Filter Method - Variance & Correlation & Xi Cor Filter",
-                "description": "분산이 낮은 피처, 선형 및 비선형 상관관계가 높은 피처를 제거합니다.",
-                "parameters": vc_params,
-                "dropped_counts": {
-                    "by_variance": int(var_dropped),
-                    "by_linear_correlation": int(corr_dropped),
-                    "by_xicor_correlation": int(xicor_dropped)
-                },
-                "result_feature_count": len(vc_features)
-            },
-            {
-                "step": "2. Embedded Method - SelectFromModel (with RandomForestClassifier)",
-                "description": "랜덤 포레스트 모델의 피처 중요도를 기반으로 주요 피처를 선택합니다.",
-                "parameters": {
-                    "random_forest_params": rf_params,
-                    "selection_threshold": sfm_params.get('threshold', 'mean')
-                },
-                "result_feature_count": len(selected_features)
-            }
-        ]
-    }
+#     to_drop = []
+#     dropped_values = {}
+#     initial_cols = list(X.columns)
+#     if len(initial_cols) > 1:
+#         corr_matrix = X.corr().abs()
+#         upper = corr_matrix.where(np.triu(np.ones_like(corr_matrix, dtype=bool), k=1))
+#         to_drop = [col for col in upper.columns if any(upper[col] > threshold)]
+#         for col in to_drop:
+#             related_cols = upper.index[upper[col] > threshold]
+#             for related_col in related_cols:
+#                 pair = tuple(sorted((col, related_col)))
+#                 if str(pair) not in dropped_values:
+#                     dropped_values[str(pair)] = upper.loc[related_col, col]
+#         X_filtered = X.drop(columns=to_drop)
+#     else:
+#         X_filtered = X
     
-    with open(filename, 'w', encoding='utf-8') as f:
-        json.dump(filtering_info, f, indent=4, ensure_ascii=False)
+#     end_time = dt.datetime.now()
+#     duration = end_time - start_time
+#     duration_str = str(duration).split('.')[0]
+    
+#     stats = {
+#         'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S'),
+#         'end_time': end_time.strftime('%Y-%m-%d %H:%M:%S'),
+#         'duration': duration_str,
+#         'threshold_value': threshold,
+#         'original_count': X.shape[1],
+#         'remaining_count': X_filtered.shape[1],
+#         'dropped_features': to_drop,
+#         'dropped_values': dropped_values
+#     }
+#     print(f"    - 피처 간 선형 상관관계 필터링 후 남은 피처 수: {stats['remaining_count']}")
+#     return X_filtered, stats
+
+# def filter_by_feature_xicor_correlation(X: pd.DataFrame, threshold: float) -> Tuple[pd.DataFrame, Dict]:
+#     start_time = dt.datetime.now()
+    
+#     to_drop = []
+#     dropped_values = {}
+#     initial_cols = list(X.columns)
+#     if len(initial_cols) > 1:
+#         for i in range(len(initial_cols)):
+#             for j in range(i + 1, len(initial_cols)):
+#                 col1 = initial_cols[i]
+#                 col2 = initial_cols[j]
+#                 if col1 in to_drop or col2 in to_drop:
+#                     continue
+#                 xi_corr_val = xicor(X[col1].values, X[col2].values)
+#                 if xi_corr_val > threshold:
+#                     to_drop.append(col2)
+#                     dropped_values[str(tuple(sorted((col1, col2))))] = xi_corr_val
+#         X_filtered = X.drop(columns=to_drop, axis=1)
+#     else:
+#         X_filtered = X
         
-    print(f"\n필터링 결과가 '{filename}' 파일에 저장되었습니다.")
+#     end_time = dt.datetime.now()
+#     duration = end_time - start_time
+#     duration_str = str(duration).split('.')[0]
+    
+#     stats = {
+#         'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S'),
+#         'end_time': end_time.strftime('%Y-%m-%d %H:%M:%S'),
+#         'duration': duration_str,
+#         'threshold_value': threshold,
+#         'original_count': X.shape[1],
+#         'remaining_count': X_filtered.shape[1],
+#         'dropped_features': to_drop,
+#         'dropped_values': dropped_values
+#     }
+#     print(f"    - 피처 간 비선형 상관관계 필터링 후 남은 피처 수: {stats['remaining_count']}")
+#     return X_filtered, stats
 
-# --- 입력 딕셔너리 샘플 ---
-if __name__ == "__main__":
-    sample_params = {
-        "variance_correlation_filter": {
-            "var_threshold": 0.01,
-            "corr_threshold": 0.95,
-            "xicor_threshold": 0.90
-        },
-        "select_from_model": {
-            "threshold": "median",
-            "random_forest": {
-                "n_estimators": 250,
-                "max_depth": 12
-            }
-        }
+
+# --- 필터링 단계별 모듈화 함수 ---
+def filter_by_variance(X: pd.DataFrame, var_threshold: float) -> Tuple[pd.DataFrame, Dict]:
+    start_time = dt.datetime.now()
+    
+    initial_cols = list(X.columns)
+    
+    # 모든 피처의 분산 값을 계산합니다.
+    features_values_checked = X.var().to_dict()
+    
+    vt = VarianceThreshold(threshold=var_threshold)
+    X_filtered = vt.fit_transform(X)
+    vt_mask = vt.get_support()
+    vt_cols = X.columns[vt_mask]
+
+    # 각 피처의 드롭 여부를 저장합니다.
+    features_dropped_yn = {col: not vt_mask[i] for i, col in enumerate(initial_cols)}
+    
+    end_time = dt.datetime.now()
+    duration = end_time - start_time
+    duration_str = str(duration).split('.')[0]
+    
+    stats = {
+        'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'end_time': end_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'duration': duration_str,
+        'threshold_value': var_threshold,
+        'original_count': len(initial_cols),
+        'remaining_count': len(vt_cols),
+        'features_dropped_yn': features_dropped_yn,
+        'features_values_checked': features_values_checked
+    }
+    print(f"    - 분산 필터링 후 남은 피처 수: {stats['remaining_count']}")
+    return pd.DataFrame(X_filtered, columns=vt_cols, index=X.index), stats
+def filter_by_target_linear_correlation(X: pd.DataFrame, y: pd.Series, threshold: float) -> Tuple[pd.DataFrame, Dict]:
+    start_time = dt.datetime.now()
+    
+    initial_cols = list(X.columns)
+    
+    # 모든 피처와 타겟 간의 상관관계를 계산합니다.
+    correlations = X.corrwith(y).abs()
+    features_values_checked = correlations.to_dict()
+    
+    low_corr_features = correlations[correlations < threshold].index.tolist()
+    X_filtered = X.drop(columns=low_corr_features)
+
+    # 각 피처의 드롭 여부를 저장합니다.
+    features_dropped_yn = {col: col in low_corr_features for col in initial_cols}
+    
+    end_time = dt.datetime.now()
+    duration = end_time - start_time
+    duration_str = str(duration).split('.')[0]
+    
+    stats = {
+        'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'end_time': end_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'duration': duration_str,
+        'threshold_value': threshold,
+        'original_count': X.shape[1],
+        'remaining_count': X_filtered.shape[1],
+        'features_dropped_yn': features_dropped_yn,
+        'features_values_checked': features_values_checked
+    }
+    print(f"    - 타겟 선형 상관관계 필터링 후 남은 피처 수: {stats['remaining_count']}")
+    return X_filtered, stats
+def filter_by_target_xicor_correlation_old(X: pd.DataFrame, y: pd.Series, threshold: float) -> Tuple[pd.DataFrame, Dict]:
+    start_time = dt.datetime.now()
+    
+    to_drop = []
+    features_dropped_yn = {}
+    features_values_checked = {}
+    initial_cols = list(X.columns)
+    
+    for col in initial_cols:
+        xi_corr_val = xicor(X[col].values, y.values)
+        is_dropped = abs(xi_corr_val) <= threshold
+        features_dropped_yn[col] = is_dropped
+        features_values_checked[col] = xi_corr_val
+        if is_dropped:
+            to_drop.append(col)
+
+    X_filtered = X.drop(columns=to_drop)
+    
+    end_time = dt.datetime.now()
+    duration = end_time - start_time
+    duration_str = str(duration).split('.')[0]
+    
+    stats = {
+        'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'end_time': end_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'duration': duration_str,
+        'threshold_value': threshold,
+        'original_count': X.shape[1],
+        'remaining_count': X_filtered.shape[1],
+        'features_dropped_yn': features_dropped_yn,
+        'features_values_checked': features_values_checked
+    }
+    print(f"    - 타겟 Xi Cor 필터링 후 남은 피처 수: {stats['remaining_count']}")
+    return X_filtered, stats
+def filter_by_target_xicor_correlation(X: pd.DataFrame, y: pd.Series, threshold: float) -> Tuple[pd.DataFrame, Dict]:
+    start_time = dt.datetime.now()
+    
+    # y (타겟)을 수치형 또는 0/1로 변환
+    if y.dtype == 'bool':
+        y_processed = y.astype(int)
+    elif pd.api.types.is_numeric_dtype(y):
+        y_processed = y
+    else:
+        # y가 수치형 또는 불리언이 아닌 경우, 처리가 불가능하므로 오류 반환
+        raise TypeError("Target 'y' must be a numeric or boolean type.")
+
+    # X 데이터프레임의 복사본을 만들어 불리언 컬럼을 0/1로 변환
+    X_processed = X.copy()
+    for col in X_processed.select_dtypes(include='bool').columns:
+        X_processed[col] = X_processed[col].astype(int)
+    
+    to_drop = []
+    features_dropped_yn = {}
+    features_values_checked = {}
+    initial_cols = list(X.columns)
+    
+    for col in initial_cols:
+        # 컬럼이 수치형 또는 불리언인지 확인
+        if pd.api.types.is_numeric_dtype(X[col]) or pd.api.types.is_bool_dtype(X[col]):
+            try:
+                # xicor는 변환된 데이터(X_processed, y_processed)를 사용
+                xi_corr_val = xicor(X_processed[col].values, y_processed.values)
+                is_dropped = abs(xi_corr_val) <= threshold
+                features_dropped_yn[col] = str(is_dropped)
+                features_values_checked[col] = xi_corr_val
+                if is_dropped:
+                    to_drop.append(col)
+            except Exception as e:
+                # xicor 계산 오류 시 드롭하지 않음
+                print(f"Warning: Failed to calculate xicor for feature '{col}'. Error: {e}")
+                features_dropped_yn[col] = 'False'
+                features_values_checked[col] = None
+        else:
+            # 수치형/불리언이 아닌 컬럼은 드롭하지 않고, 정보도 저장하지 않음
+            features_dropped_yn[col] = 'False'
+    
+    X_filtered = X.drop(columns=to_drop)
+    
+    end_time = dt.datetime.now()
+    duration = end_time - start_time
+    duration_str = str(duration).split('.')[0]
+    
+    stats = {
+        'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'end_time': end_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'duration': duration_str,
+        'threshold_value': threshold,
+        'original_count': X.shape[1],
+        'remaining_count': X_filtered.shape[1],
+        'features_dropped_yn': features_dropped_yn,
+        'features_values_checked': features_values_checked
     }
     
-    perform_feature_selection_workflow(sample_params)
+    print(f"    - 타겟 Xi Cor 필터링 후 남은 피처 수: {stats['remaining_count']}")
+    return X_filtered, stats
+def filter_by_feature_linear_correlation(X: pd.DataFrame, threshold: float) -> Tuple[pd.DataFrame, Dict]:
+    start_time = dt.datetime.now()
+    
+    features_dropped_yn = {col: False for col in X.columns}
+    features_values_checked = {}
+    initial_cols = list(X.columns)
+    
+    if len(initial_cols) > 1:
+        corr_matrix = X.corr().abs()
+        upper = corr_matrix.where(np.triu(np.ones_like(corr_matrix, dtype=bool), k=1))
+        
+        to_drop = []
+        for col in upper.columns:
+            related_cols = upper.index[upper[col] > threshold].tolist()
+            if related_cols:
+                # 상관관계가 높은 피처 쌍의 값을 저장합니다.
+                for related_col in related_cols:
+                    pair = tuple(sorted((col, related_col)))
+                    features_values_checked[str(pair)] = upper.loc[related_col, col]
+                
+                # 드롭할 피처를 결정합니다 (여기서는 col을 드롭하도록 로직을 가정).
+                if col not in to_drop:
+                    to_drop.append(col)
+        
+        # 드롭할 피처를 바탕으로 features_dropped_yn을 업데이트합니다.
+        for col in to_drop:
+            features_dropped_yn[col] = True
+
+        X_filtered = X.drop(columns=to_drop)
+    else:
+        X_filtered = X
+        to_drop = []
+
+    end_time = dt.datetime.now()
+    duration = end_time - start_time
+    duration_str = str(duration).split('.')[0]
+    
+    stats = {
+        'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'end_time': end_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'duration': duration_str,
+        'threshold_value': threshold,
+        'original_count': X.shape[1],
+        'remaining_count': X_filtered.shape[1],
+        'features_dropped_yn': features_dropped_yn,
+        'features_values_checked': features_values_checked
+    }
+    print(f"    - 피처 간 선형 상관관계 필터링 후 남은 피처 수: {stats['remaining_count']}")
+    return X_filtered, stats
+def filter_by_feature_xicor_correlation(X: pd.DataFrame, threshold: float) -> Tuple[pd.DataFrame, Dict]:
+    start_time = dt.datetime.now()
+    
+    to_drop = []
+    features_dropped_yn = {col: False for col in X.columns}
+    features_values_checked = {}
+    initial_cols = list(X.columns)
+    
+    if len(initial_cols) > 1:
+        for i in range(len(initial_cols)):
+            for j in range(i + 1, len(initial_cols)):
+                col1 = initial_cols[i]
+                col2 = initial_cols[j]
+                
+                # 이미 드롭 예정인 피처는 건너뜁니다.
+                if col1 in to_drop or col2 in to_drop:
+                    continue
+                
+                xi_corr_val = xicor(X[col1].values, X[col2].values)
+                pair_key = str(tuple(sorted((col1, col2))))
+                features_values_checked[pair_key] = xi_corr_val
+                
+                if xi_corr_val > threshold:
+                    # 더 높은 상관관계를 보이는 피처를 드롭하도록 선택할 수 있습니다.
+                    # 여기서는 간단하게 col2를 드롭하도록 구현했습니다.
+                    to_drop.append(col2)
+                    features_dropped_yn[col2] = True
+
+        X_filtered = X.drop(columns=to_drop, axis=1)
+    else:
+        X_filtered = X
+        
+    end_time = dt.datetime.now()
+    duration = end_time - start_time
+    duration_str = str(duration).split('.')[0]
+    
+    stats = {
+        'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'end_time': end_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'duration': duration_str,
+        'threshold_value': threshold,
+        'original_count': X.shape[1],
+        'remaining_count': X_filtered.shape[1],
+        'features_dropped_yn': features_dropped_yn,
+        'features_values_checked': features_values_checked
+    }
+    print(f"    - 피처 간 비선형 상관관계 필터링 후 남은 피처 수: {stats['remaining_count']}")
+    return X_filtered, stats
+
+
+# --- 통합 필터링 워크플로 함수명 변경 ---
+def feature_filter(X: pd.DataFrame, y: pd.Series, params: Dict) -> Tuple[pd.DataFrame, list, Dict]:
+    X_filtered = X.copy()
+    filter_stats = {}
+    print("\n--- 피처 필터링 시작 ---")
+
+    # 1. 분산 필터링
+    if params.get('apply_variance_filter', True):
+        X_filtered, stats = filter_by_variance(X_filtered, params['var_threshold'])
+        filter_stats['variance'] = stats
+    # 2. 타겟과의 선형 상관관계 필터링
+    if params.get('apply_target_linear_corr_filter', True) and X_filtered.shape[1] > 0:
+        X_filtered, stats = filter_by_target_linear_correlation(X_filtered, y, params['target_linear_corr_threshold'])
+        filter_stats['target_linear_correlation'] = stats
+    # 3. 타겟과의 비선형 상관관계 (Xi Cor) 필터링
+    if params.get('apply_target_xicor_filter', True) and X_filtered.shape[1] > 0:
+        X_filtered, stats = filter_by_target_xicor_correlation(X_filtered, y, params['target_xicor_threshold'])
+        filter_stats['target_xicor_correlation'] = stats
+    # 4. 피처 간 선형 상관관계 필터링
+    if params.get('apply_feature_linear_corr_filter', True) and X_filtered.shape[1] > 1:
+        X_filtered, stats = filter_by_feature_linear_correlation(X_filtered, params['feature_linear_corr_threshold'])
+        filter_stats['feature_linear_correlation'] = stats
+    # 5. 피처 간 비선형 상관관계 (Xi Cor) 필터링
+    if params.get('apply_feature_xicor_filter', True) and X_filtered.shape[1] > 1:
+        X_filtered, stats = filter_by_feature_xicor_correlation(X_filtered, params['feature_xicor_threshold'])
+        filter_stats['feature_xicor_correlation'] = stats
+            
+    final_cols = list(X_filtered.columns)
+    return X_filtered, final_cols, filter_stats
 
 def select_feature_old(test_data, train_data, feature_selector):
 
@@ -1096,7 +1537,7 @@ def select_feature_old(test_data, train_data, feature_selector):
 
     return feature_selection_info
 # --- 개선된 메인 함수 ---
-def select_feature_2(train_data, feature_selector_params):
+def select_feature_old2(train_data, feature_selector_params):
     """
     개선된 피처 선택 워크플로를 수행하고 결과를 딕셔너리로 반환합니다.
     """
@@ -1165,7 +1606,7 @@ def select_feature_2(train_data, feature_selector_params):
     return feature_selection_info
 
 # --- 보완된 메인 함수 ---
-def select_feature(test_data, train_data, feature_selector_params):
+def select_feature_old3(test_data, train_data, feature_selector_params):
     """
     개선된 피처 선택 워크플로를 수행하고 결과를 딕셔너리로 반환합니다.
     """
@@ -1212,6 +1653,259 @@ def select_feature(test_data, train_data, feature_selector_params):
         feature_selection_info['dropped_counts'] = {key: 0 for key in ['by_variance', 'by_target_linear_correlation', 'by_target_xicor_correlation', 'by_feature_linear_correlation', 'by_feature_xicor_correlation']}
         feature_selection_info['dropped_features'] = {key: [] for key in ['by_variance', 'by_target_linear_correlation', 'by_target_xicor_correlation', 'by_feature_linear_correlation', 'by_feature_xicor_correlation']}
 
+    return feature_selection_info
+
+# --- 보완된 메인 함수 ---
+def select_feature_old4(train_data, feature_selector_params):
+    """
+    개선된 피처 선택 워크플로를 수행하고 결과를 딕셔너리로 반환합니다.
+    """
+    X_train = train_data.iloc[:, :-1]
+    y_train = train_data.iloc[:, -1]
+
+    feature_selection_info = feature_selector_params.copy()
+    
+    if 'CorrelationsClassifier' in feature_selector_params.get("feature_selector_name", ''):
+        print("피처 선택기:", feature_selector_params["feature_selector_name"])
+        
+        filter_params = feature_selector_params['filter_methods']
+        X_train_filtered_df, final_features, stats = variance_correlation_filter(
+            X=X_train,
+            y=y_train,
+            var_threshold=filter_params['variance_threshold']['threshold'],
+            target_linear_corr_threshold=filter_params['target_correlation_filter']['threshold'],
+            target_xicor_threshold=filter_params['target_xicor_filter']['threshold'],
+            feature_linear_corr_threshold=filter_params['feature_correlation_filter']['threshold'],
+            feature_xicor_threshold=filter_params['xicor_correlation_filter']['threshold']
+        )
+        
+        final_feature_count = len(final_features)
+        print("- 최종 피처 수:", final_feature_count)
+
+        feature_selection_info['initial_feature_count'] = stats['initial_count']
+        feature_selection_info['final_feature_count'] = final_feature_count
+        feature_selection_info['final_features'] = final_features
+        feature_selection_info['dropped_counts'] = stats['dropped_counts']
+        feature_selection_info['dropped_features'] = stats['dropped_features']
+
+    else:
+        print("피처 선택기:", feature_selector_params.get("feature_selector_name", ''))
+        initial_feature_count = X_train.shape[1]
+        final_features = list(X_train.columns)
+        final_feature_count = len(final_features)
+
+        print("- 초기 피처 수:", initial_feature_count)
+        print("- 최종 피처 수:", final_feature_count)
+
+        feature_selection_info['initial_feature_count'] = initial_feature_count
+        feature_selection_info['final_feature_count'] = final_feature_count
+        feature_selection_info['final_features'] = final_features
+        feature_selection_info['dropped_counts'] = {key: 0 for key in ['by_variance', 'by_target_linear_correlation', 'by_target_xicor_correlation', 'by_feature_linear_correlation', 'by_feature_xicor_correlation']}
+        feature_selection_info['dropped_features'] = {key: [] for key in ['by_variance', 'by_target_linear_correlation', 'by_target_xicor_correlation', 'by_feature_linear_correlation', 'by_feature_xicor_correlation']}
+
+    return feature_selection_info
+
+
+# # perform_feature_selection_workflow 미사용 -> select_feature 에 포함
+# def perform_feature_selection_workflow(feature_selection_params, X, y):
+#     """
+#     단계별 파라미터 딕셔너리를 사용하여 피처 선택 워크플로를 수행하고 결과를 JSON 파일로 저장합니다.
+#     """
+#     # # 1. 샘플 데이터 생성
+#     # X, y = make_classification(
+#     #     n_samples=1000,
+#     #     n_features=200,
+#     #     n_informative=100,
+#     #     n_informative=100,
+#     #     n_redundant=10,
+#     #     n_repeated=5,
+#     #     n_classes=2,
+#     #     random_state=42
+#     # )
+#     # discrete_feature_indices = np.random.choice(
+#     #     X.shape[1], 50, replace=False
+#     # )
+#     # X[:, discrete_feature_indices] = np.round(X[:, discrete_feature_indices])
+
+#     # feature_names = [f'feature_{i}' for i in range(X.shape[1])]
+#     # df = pd.DataFrame(X, columns=feature_names)
+#     # df['target'] = y
+
+#     # print("원본 데이터셋의 피처 개수:", df.shape[1] - 1)
+    
+#     # 2. 필터 방법 (Filter Method) - Variance & Correlation & Xi Cor Filter
+#     vc_params = feature_selection_params.get('variance_correlation_filter', {})
+    
+#     X_filtered_vc, vc_features, var_dropped, corr_dropped, xicor_dropped = variance_correlation_filter(
+#         X=df.iloc[:, :-1],
+#         var_threshold=vc_params.get('var_threshold', 0.0),
+#         corr_threshold=vc_params.get('corr_threshold', 0.98),
+#         xicor_threshold=vc_params.get('xicor_threshold', 0.9)
+#     )
+    
+#     # 3. 임베디드 방법 (Embedded Method) - RandomForestClassifier + SelectFromModel
+#     sfm_params = feature_selection_params.get('select_from_model', {})
+#     rf_params = sfm_params.get('random_forest', {})
+    
+#     X_train, _, y_train, _ = train_test_split(
+#         X_filtered_vc.values, y, test_size=0.3, random_state=42
+#     )
+    
+#     model = RandomForestClassifier(
+#         n_estimators=rf_params.get('n_estimators', 100),
+#         max_depth=rf_params.get('max_depth', None),
+#         random_state=42,
+#         n_jobs=-1
+#     )
+#     model.fit(X_train, y_train)
+    
+#     sfm = SelectFromModel(
+#         model, 
+#         prefit=True, 
+#         threshold=sfm_params.get('threshold', 'mean')
+#     )
+#     X_selected_sfm = sfm.transform(X_filtered_vc.values)
+    
+#     sfm_mask = sfm.get_support(indices=True)
+#     selected_features = [vc_features[i] for i in sfm_mask]
+    
+#     print("SelectFromModel 적용 후 최종 피처 개수:", len(selected_features))
+    
+#     # 4. 필터링 결과 및 정보 저장
+#     current_time = dt.datetime.now()
+#     file_id = uuid.uuid4().hex[:8]
+#     filename = current_time.strftime('%y%m%d_%H%M%S') + f'_{file_id}.json'
+    
+#     filtering_info = {
+#         "timestamp": current_time.strftime('%Y-%m-%d %H:%M:%S'),
+#         "final_feature_count": len(selected_features),
+#         "selected_features": selected_features,
+#         "workflow_steps": [
+#             {
+#                 "step": "1. Filter Method - Variance & Correlation & Xi Cor Filter",
+#                 "description": "분산이 낮은 피처, 선형 및 비선형 상관관계가 높은 피처를 제거합니다.",
+#                 "parameters": vc_params,
+#                 "dropped_counts": {
+#                     "by_variance": int(var_dropped),
+#                     "by_linear_correlation": int(corr_dropped),
+#                     "by_xicor_correlation": int(xicor_dropped)
+#                 },
+#                 "result_feature_count": len(vc_features)
+#             },
+#             {
+#                 "step": "2. Embedded Method - SelectFromModel (with RandomForestClassifier)",
+#                 "description": "랜덤 포레스트 모델의 피처 중요도를 기반으로 주요 피처를 선택합니다.",
+#                 "parameters": {
+#                     "random_forest_params": rf_params,
+#                     "selection_threshold": sfm_params.get('threshold', 'mean')
+#                 },
+#                 "result_feature_count": len(selected_features)
+#             }
+#         ]
+#     }
+    
+#     with open(filename, 'w', encoding='utf-8') as f:
+#         json.dump(filtering_info, f, indent=4, ensure_ascii=False)
+        
+#     print(f"\n필터링 결과가 '{filename}' 파일에 저장되었습니다.")
+
+def select_feature(train_data: pd.DataFrame, feature_selector_params: Dict) -> Dict:
+    """
+    개선된 피처 선택 워크플로를 수행하고 결과를 딕셔너리로 반환합니다.
+    """
+    X_train = train_data.iloc[:, :-1]
+    y_train = train_data.iloc[:, -1]
+    feature_selection_info = feature_selector_params.copy()
+    initial_feature_count = X_train.shape[1]
+    
+    # feature_selector_name을 기반으로 분기
+    if feature_selector_params.get("feature_selector_name") == 'FeatureFilter':
+        print("\n--- 피처 선택기: Filter Method ---")
+        filter_params = feature_selector_params['filter_methods']
+        X_train_filtered_df, final_features, stats = feature_filter(
+            X=X_train,
+            y=y_train,
+            params=filter_params
+        )
+        final_feature_count = len(final_features)
+        feature_selection_info['initial_feature_count'] = initial_feature_count
+        feature_selection_info['final_feature_count'] = final_feature_count
+        feature_selection_info['final_features'] = final_features
+        feature_selection_info['filter_details'] = stats
+    elif feature_selector_params.get("feature_selector_name") == 'EmbeddedMethod':
+        print("\n--- 피처 선택기: Embedded Method (SelectFromModel) ---")
+        model_params = feature_selector_params['model_based']['random_forest']
+        threshold = feature_selector_params['model_based']['threshold']
+        
+        model = RandomForestClassifier(
+            n_estimators=model_params.get('n_estimators', 100),
+            max_depth=model_params.get('max_depth', None),
+            random_state=42, n_jobs=-1
+        )
+        model.fit(X_train, y_train)
+        
+        sfm = SelectFromModel(model, prefit=True, threshold=threshold)
+        sfm_mask = sfm.get_support()
+        
+        # 피처 중요도 정보 추출 및 저장
+        feature_importances = model.feature_importances_
+        feature_importance_dict = {col: imp for col, imp in zip(X_train.columns, feature_importances)}
+        
+        selected_features = list(X_train.columns[sfm_mask])
+        dropped_features = [col for col in X_train.columns if col not in selected_features]
+        final_feature_count = len(selected_features)
+        
+        # 상세 통계 정보 딕셔너리 구성
+        stats = {
+            'method': 'SelectFromModel',
+            'threshold_type': threshold,
+            'original_count': initial_feature_count,
+            'remaining_count': final_feature_count,
+            'selected_features': selected_features,
+            'dropped_features': dropped_features,
+            'feature_importances': feature_importance_dict
+        }
+        
+        feature_selection_info['initial_feature_count'] = initial_feature_count
+        feature_selection_info['final_feature_count'] = final_feature_count
+        feature_selection_info['final_features'] = selected_features
+        feature_selection_info['filter_details'] = stats
+    else:
+        print("\n--- 피처 선택기: No-op ---")
+        final_features = list(X_train.columns)
+        final_feature_count = initial_feature_count
+        stats = {
+            'method': 'No-op',
+            'original_count': initial_feature_count,
+            'remaining_count': final_feature_count,
+            'selected_features': final_features,
+            'dropped_features': []
+        }
+        feature_selection_info['initial_feature_count'] = initial_feature_count
+        feature_selection_info['final_feature_count'] = final_feature_count
+        feature_selection_info['final_features'] = final_features
+        feature_selection_info['filter_details'] = stats
+    
+    # 결과 및 정보 저장
+    
+    # 저장할 디렉토리
+    destination_dir = 'data/result/jsons'
+
+    # 대상 디렉토리가 없으면 생성
+    os.makedirs(destination_dir, exist_ok=True)
+
+    current_time = dt.datetime.now()
+    file_id = uuid.uuid4().hex[:8]
+    filename = "feature_selection_info_" + current_time.strftime('%y%m%d_%H%M%S') + f'_{file_id}.json'
+
+    file_path = os.path.join(destination_dir, filename)
+
+    with open(file_path, 'w', encoding='utf-8') as f:
+        json.dump(feature_selection_info, f, indent=4, ensure_ascii=False)
+
+    print(f"\n피처 선택 결과가 '{file_path}' 파일에 저장되었습니다.")
+    
+    print(f"\n- 최종 피처 수: {final_feature_count}")
     return feature_selection_info
 
 

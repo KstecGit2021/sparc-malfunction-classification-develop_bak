@@ -41,7 +41,7 @@ feature_selector_default_old = \
     }
 }
 
-feature_selector_default = \
+feature_selector_default_old2 = \
 {
     "feature_selector_name": "CorrelationsClassifier_New",  # 피처 선택기 이름 정의 (식별용)
     "filter_methods": {  # 모든 필터링 기법과 파라미터를 포함
@@ -63,9 +63,67 @@ feature_selector_default = \
     }
 }
 
+# Filter Method를 적용하는 경우 (FeatureFilter)
+feature_selector_params_FeatureFilter_default = {
+    "feature_selector_name": "FeatureFilter",
+    "filter_methods": {
+        "apply_variance_filter": True,
+        "var_threshold": 0.01,
+        "apply_target_linear_corr_filter": True,
+        "target_linear_corr_threshold": 0.05,
+        "apply_target_xicor_filter": True,
+        "target_xicor_threshold": 0.1,
+        "apply_feature_linear_corr_filter": True,
+        "feature_linear_corr_threshold": 0.95,
+        "apply_feature_xicor_filter": True,
+        "feature_xicor_threshold": 0.9
+    }
+}
+feature_selector_params_FeatureFilter_default_cfg = Config.configure_data_node(id="feature_selector_params_FeatureFilter_default", storage_type="json", default_data=feature_selector_params_FeatureFilter_default)
 
-feature_selector_default_cfg = Config.configure_data_node(id="feature_selector_default", storage_type="json", default_data=feature_selector_default)
-feature_selector_cfg = Config.configure_data_node(id="feature_selector", storage_type="json", default_data=feature_selector_default)
+# Embedded Method (SelectFromModel)를 적용하는 경우
+feature_selector_params_SelectFromModel_default = \
+{
+    "feature_selector_name": "EmbeddedMethod",
+    "model_based": {
+        "threshold": "median",
+        "random_forest": {
+            "n_estimators": 250,
+            "max_depth": 12
+        }
+    }
+}
+feature_selector_params_SelectFromModel_default_cfg = Config.configure_data_node(id="feature_selector_params_SelectFromModel_default", storage_type="json", default_data=feature_selector_params_SelectFromModel_default)
+
+# 피처 선택을 수행하지 않는 경우
+feature_selector_params_no_op = \
+{
+    "feature_selector_name": "None"
+}
+feature_selector_params_no_op_cfg = Config.configure_data_node(id="feature_selector_params_no_op", storage_type="json", default_data=feature_selector_params_no_op)
+
+
+# Filter Method를 적용하는 경우 (FeatureFilter)를 selector 기본으로
+feature_selector_params_default = \
+{
+    "feature_selector_name": "FeatureFilter",
+    "filter_methods": {
+        "apply_variance_filter": True,
+        "var_threshold": 0.01,
+        "apply_target_linear_corr_filter": True,
+        "target_linear_corr_threshold": 0.05,
+        "apply_target_xicor_filter": False,
+        "target_xicor_threshold": 0.0,
+        "apply_feature_linear_corr_filter": False,
+        "feature_linear_corr_threshold": 0.95,
+        "apply_feature_xicor_filter": False,
+        "feature_xicor_threshold": 0.9
+    }
+}
+feature_selector_cfg = Config.configure_data_node(id="feature_selector", storage_type="json", default_data=feature_selector_params_default)
+
+
+
 feature_selection_info_cfg = Config.configure_data_node(id="feature_selection_info", storage_type="json")
 
 # 훈련/테스트 데이터 분할 및 샘플링을 적용 파라미터.
@@ -517,7 +575,7 @@ task_create_train_test_cfg = Config.configure_task(
 # preprocessed_dataset --> create train data --> train_dataset, test_dataset --> select_feature
 task_select_feature_cfg = Config.configure_task(
     id="select_feature",
-    input=[test_dataset_cfg, train_dataset_cfg, feature_selector_cfg],
+    input=[train_dataset_cfg, feature_selector_cfg],
     function=select_feature,
     output=feature_selection_info_cfg,
     skippable=True,
@@ -618,8 +676,9 @@ for model, function in models.items():
 scenario_cfg = Config.configure_scenario(
     id="churn_classification",
     additional_data_node_configs = [
-        train_parameters_list_default_cfg,
-        feature_selector_default_cfg,
+        feature_selector_params_FeatureFilter_default_cfg,
+        feature_selector_params_SelectFromModel_default_cfg,
+        feature_selector_params_no_op_cfg,
     ],
     task_configs=[
         task_preprocess_dataset_cfg,

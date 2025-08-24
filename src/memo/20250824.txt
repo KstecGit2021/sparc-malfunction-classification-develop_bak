@@ -1,0 +1,14 @@
+def perform_feature_selection_workflow(feature_selection_params, X, y):
+
+def variance_correlation_filter(
+    X: pd.DataFrame, y: pd.Series, var_threshold=0.0, target_linear_corr_threshold=0.01, target_xicor_threshold=0.05, feature_linear_corr_threshold=0.98, feature_xicor_threshold=0.9
+):
+
+    return X_df_xicor_feature, final_cols, stats
+
+
+
+def select_feature(train_data, feature_selector_params):
+
+
+선택적 적용 및 분산, 상관행결, 변수중요도 출력

@@ -15,7 +15,13 @@ has_header = "True:bool"
 
 [DATA_NODE.test_dataset]
 
-[DATA_NODE.feature_selector_default]
+[DATA_NODE.feature_selector_params_FeatureFilter_default]
+storage_type = "json"
+
+[DATA_NODE.feature_selector_params_SelectFromModel_default]
+storage_type = "json"
+
+[DATA_NODE.feature_selector_params_no_op]
 storage_type = "json"
 
 [DATA_NODE.feature_selector]
@@ -163,7 +169,7 @@ skippable = "True:bool"
 
 [TASK.select_feature]
 function = "algos.algos.select_feature:function"
-inputs = [ "test_dataset:SECTION", "train_dataset:SECTION", "feature_selector:SECTION",]
+inputs = [ "train_dataset:SECTION", "feature_selector:SECTION",]
 outputs = [ "feature_selection_info:SECTION",]
 skippable = "True:bool"
 
@@ -337,13 +343,19 @@ skippable = "True:bool"
 
 [SCENARIO.churn_classification]
 tasks = [ "preprocess_dataset:SECTION", "create_train_and_test_data:SECTION", "select_feature:SECTION", "train_model_baseline:SECTION", "find_best_threshold_baseline:SECTION", "create_metrics_on_train_baseline:SECTION", "predict_the_test_data_baseline:SECTION", "task_roc_baseline:SECTION", "task_create_metrics_baseline:SECTION", "task_create_results_baseline:SECTION", "train_model_logistic_regression:SECTION", "find_best_threshold_logistic_regression:SECTION", "create_metrics_on_train_logistic_regression:SECTION", "predict_the_test_data_logistic_regression:SECTION", "task_roc_logistic_regression:SECTION", "task_create_metrics_logistic_regression:SECTION", "task_create_results_logistic_regression:SECTION", "train_model_random_forest:SECTION", "find_best_threshold_random_forest:SECTION", "create_metrics_on_train_random_forest:SECTION", "predict_the_test_data_random_forest:SECTION", "task_roc_random_forest:SECTION", "task_create_metrics_random_forest:SECTION", "task_create_results_random_forest:SECTION", "train_model_xgboost:SECTION", "find_best_threshold_xgboost:SECTION", "create_metrics_on_train_xgboost:SECTION", "predict_the_test_data_xgboost:SECTION", "task_roc_xgboost:SECTION", "task_create_metrics_xgboost:SECTION", "task_create_results_xgboost:SECTION",]
-additional_data_nodes = [ "train_parameters_list_default:SECTION", "feature_selector_default:SECTION",]
+additional_data_nodes = [ "feature_selector_params_FeatureFilter_default:SECTION", "feature_selector_params_SelectFromModel_default:SECTION", "feature_selector_params_no_op:SECTION",]
 
-[DATA_NODE.feature_selector_default.default_data]
-feature_selector_name = "CorrelationsClassifier_New"
+[DATA_NODE.feature_selector_params_FeatureFilter_default.default_data]
+feature_selector_name = "FeatureFilter"
+
+[DATA_NODE.feature_selector_params_SelectFromModel_default.default_data]
+feature_selector_name = "EmbeddedMethod"
+
+[DATA_NODE.feature_selector_params_no_op.default_data]
+feature_selector_name = "None"
 
 [DATA_NODE.feature_selector.default_data]
-feature_selector_name = "CorrelationsClassifier_New"
+feature_selector_name = "FeatureFilter"
 
 [DATA_NODE.split_parameter.default_data]
 test_size = "0.2:float"
@@ -384,6 +396,33 @@ change_threshold_baseline = [ "task_create_results_baseline:SECTION", "task_crea
 change_threshold_logistic_regression = [ "task_create_results_logistic_regression:SECTION", "task_create_metrics_logistic_regression:SECTION", "create_metrics_on_train_logistic_regression:SECTION",]
 change_threshold_random_forest = [ "task_create_results_random_forest:SECTION", "task_create_metrics_random_forest:SECTION", "create_metrics_on_train_random_forest:SECTION",]
 change_threshold_xgboost = [ "task_create_results_xgboost:SECTION", "task_create_metrics_xgboost:SECTION", "create_metrics_on_train_xgboost:SECTION",]
+
+[DATA_NODE.feature_selector_params_FeatureFilter_default.default_data.filter_methods]
+apply_variance_filter = "True:bool"
+var_threshold = "0.01:float"
+apply_target_linear_corr_filter = "True:bool"
+target_linear_corr_threshold = "0.05:float"
+apply_target_xicor_filter = "True:bool"
+target_xicor_threshold = "0.1:float"
+apply_feature_linear_corr_filter = "True:bool"
+feature_linear_corr_threshold = "0.95:float"
+apply_feature_xicor_filter = "True:bool"
+feature_xicor_threshold = "0.9:float"
+
+[DATA_NODE.feature_selector_params_SelectFromModel_default.default_data.model_based]
+threshold = "median"
+
+[DATA_NODE.feature_selector.default_data.filter_methods]
+apply_variance_filter = "True:bool"
+var_threshold = "0.01:float"
+apply_target_linear_corr_filter = "True:bool"
+target_linear_corr_threshold = "0.05:float"
+apply_target_xicor_filter = "False:bool"
+target_xicor_threshold = "0.0:float"
+apply_feature_linear_corr_filter = "False:bool"
+feature_linear_corr_threshold = "0.95:float"
+apply_feature_xicor_filter = "False:bool"
+feature_xicor_threshold = "0.9:float"
 
 [DATA_NODE.train_parameters_list_default.default_data.baseline]
 function_name = "train_model_baseline"
@@ -457,35 +496,9 @@ pos_label = "1:int"
 high = "1.2:float"
 low = "0.8:float"
 
-[DATA_NODE.feature_selector_default.default_data.filter_methods.variance_threshold]
-threshold = "0.0:float"
-
-[DATA_NODE.feature_selector_default.default_data.filter_methods.target_correlation_filter]
-threshold = "0.01:float"
-
-[DATA_NODE.feature_selector_default.default_data.filter_methods.target_xicor_filter]
-threshold = "0.05:float"
-
-[DATA_NODE.feature_selector_default.default_data.filter_methods.feature_correlation_filter]
-threshold = "0.98:float"
-
-[DATA_NODE.feature_selector_default.default_data.filter_methods.xicor_correlation_filter]
-threshold = "0.9:float"
-
-[DATA_NODE.feature_selector.default_data.filter_methods.variance_threshold]
-threshold = "0.0:float"
-
-[DATA_NODE.feature_selector.default_data.filter_methods.target_correlation_filter]
-threshold = "0.01:float"
-
-[DATA_NODE.feature_selector.default_data.filter_methods.target_xicor_filter]
-threshold = "0.05:float"
-
-[DATA_NODE.feature_selector.default_data.filter_methods.feature_correlation_filter]
-threshold = "0.98:float"
-
-[DATA_NODE.feature_selector.default_data.filter_methods.xicor_correlation_filter]
-threshold = "0.9:float"
+[DATA_NODE.feature_selector_params_SelectFromModel_default.default_data.model_based.random_forest]
+n_estimators = "250:int"
+max_depth = "12:int"
 
 [DATA_NODE.train_parameters_list_default.default_data.baseline.importance_data]
 Features = [ "SensorOffsetHot-Cold", "band gap dpat_ok for band gap", "Radius",]
