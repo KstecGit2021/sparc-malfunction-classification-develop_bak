@@ -67,15 +67,15 @@ feature_selector_default_old2 = \
 feature_selector_params_FeatureFilter_default = {
     "feature_selector_name": "FeatureFilter",
     "filter_methods": {
-        "apply_variance_filter": True,
+        "apply_variance_filter": False,
         "var_threshold": 0.01,
-        "apply_target_linear_corr_filter": True,
+        "apply_target_linear_corr_filter": False,
         "target_linear_corr_threshold": 0.05,
-        "apply_target_xicor_filter": True,
+        "apply_target_xicor_filter": False,
         "target_xicor_threshold": 0.1,
-        "apply_feature_linear_corr_filter": True,
+        "apply_feature_linear_corr_filter": False,
         "feature_linear_corr_threshold": 0.95,
-        "apply_feature_xicor_filter": True,
+        "apply_feature_xicor_filter": False,
         "feature_xicor_threshold": 0.9
     }
 }
@@ -108,7 +108,7 @@ feature_selector_params_default = \
 {
     "feature_selector_name": "FeatureFilter",
     "filter_methods": {
-        "apply_variance_filter": True,
+        "apply_variance_filter": False,
         "var_threshold": 0.01,
         "apply_target_linear_corr_filter": False,
         "target_linear_corr_threshold": 0.05,

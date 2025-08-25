@@ -1302,7 +1302,7 @@ def filter_by_target_xicor_correlation(X: pd.DataFrame, y: pd.Series, threshold:
     
     print(f"    - 타겟 Xi Cor 필터링 후 남은 피처 수: {stats['remaining_count']}")
     return X_filtered, stats
-def filter_by_feature_linear_correlation(X: pd.DataFrame, threshold: float) -> Tuple[pd.DataFrame, Dict]:
+def filter_by_feature_linear_correlation_old(X: pd.DataFrame, threshold: float) -> Tuple[pd.DataFrame, Dict]:
     start_time = dt.datetime.now()
     
     features_dropped_yn = {col: False for col in X.columns}
@@ -1351,7 +1351,63 @@ def filter_by_feature_linear_correlation(X: pd.DataFrame, threshold: float) -> T
     }
     print(f"    - 피처 간 선형 상관관계 필터링 후 남은 피처 수: {stats['remaining_count']}")
     return X_filtered, stats
-def filter_by_feature_xicor_correlation(X: pd.DataFrame, threshold: float) -> Tuple[pd.DataFrame, Dict]:
+def filter_by_feature_linear_correlation(X: pd.DataFrame, threshold: float) -> Tuple[pd.DataFrame, Dict]:
+    start_time = dt.datetime.now()
+    
+    features_dropped_yn = {col: False for col in X.columns}
+    features_values_checked = {}
+    initial_cols = list(X.columns)
+    
+    to_drop = []
+    
+    if len(initial_cols) > 1:
+        corr_matrix = X.corr().abs()
+        upper = corr_matrix.where(np.triu(np.ones_like(corr_matrix, dtype=bool), k=1))
+        
+        # 모든 컬럼 쌍의 상관관계 값을 저장
+        for i in range(len(upper.columns)):
+            for j in range(i + 1, len(upper.columns)):
+                col1 = upper.columns[i]
+                col2 = upper.columns[j]
+                
+                # 'col1'과 'col2'의 상관관계 값을 가져옵니다.
+                correlation_value = upper.loc[col1, col2]
+                
+                # 키를 정렬된 튜플로 만들어 일관성을 유지합니다.
+                pair = tuple(sorted((col1, col2)))
+                features_values_checked[str(pair)] = correlation_value
+                
+                # threshold를 넘는 경우 'to_drop' 리스트에 추가합니다.
+                if correlation_value > threshold:
+                    if col2 not in to_drop:
+                        to_drop.append(col2)
+        
+        # 'to_drop' 리스트를 바탕으로 features_dropped_yn을 업데이트합니다.
+        for col in to_drop:
+            features_dropped_yn[col] = True
+
+        X_filtered = X.drop(columns=to_drop)
+    else:
+        X_filtered = X
+
+    end_time = dt.datetime.now()
+    duration = end_time - start_time
+    duration_str = str(duration).split('.')[0]
+    
+    stats = {
+        'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'end_time': end_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'duration': duration_str,
+        'threshold_value': threshold,
+        'original_count': X.shape[1],
+        'remaining_count': X_filtered.shape[1],
+        'features_dropped_yn': features_dropped_yn,
+        'features_values_checked': features_values_checked
+    }
+    
+    print(f"    - 피처 간 선형 상관관계 필터링 후 남은 피처 수: {stats['remaining_count']}")
+    return X_filtered, stats
+def filter_by_feature_xicor_correlation_old(X: pd.DataFrame, threshold: float) -> Tuple[pd.DataFrame, Dict]:
     start_time = dt.datetime.now()
     
     to_drop = []
@@ -1399,7 +1455,68 @@ def filter_by_feature_xicor_correlation(X: pd.DataFrame, threshold: float) -> Tu
     }
     print(f"    - 피처 간 비선형 상관관계 필터링 후 남은 피처 수: {stats['remaining_count']}")
     return X_filtered, stats
-
+def filter_by_feature_xicor_correlation(X: pd.DataFrame, threshold: float) -> Tuple[pd.DataFrame, Dict]:
+    start_time = dt.datetime.now()
+    
+    to_drop = []
+    features_dropped_yn = {col: False for col in X.columns}
+    features_values_checked = {}
+    initial_cols = list(X.columns)
+    
+    if len(initial_cols) > 1:
+        # 먼저 모든 컬럼 쌍의 xi 상관관계를 계산하고 저장합니다.
+        for i in range(len(initial_cols)):
+            for j in range(i + 1, len(initial_cols)):
+                col1 = initial_cols[i]
+                col2 = initial_cols[j]
+                
+                # 'xicor' 함수를 사용하여 비선형 상관관계 값을 계산합니다.
+                # 이 값은 threshold와 관계없이 항상 저장됩니다.
+                xi_corr_val = xicor(X[col1].values, X[col2].values)
+                pair_key = str(tuple(sorted((col1, col2))))
+                features_values_checked[pair_key] = xi_corr_val
+        
+        # 이제 저장된 값을 바탕으로 드롭할 컬럼을 결정합니다.
+        # 이 루프에서는 상관관계가 높은 컬럼을 찾아 'to_drop' 리스트에 추가합니다.
+        # 이전에 건너뛰었던 로직을 제거하고 전체 컬럼을 다시 확인합니다.
+        for i in range(len(initial_cols)):
+            for j in range(i + 1, len(initial_cols)):
+                col1 = initial_cols[i]
+                col2 = initial_cols[j]
+                
+                # 이미 드롭 예정인 피처는 추가로 검토하지 않습니다.
+                if col1 in to_drop or col2 in to_drop:
+                    continue
+                
+                pair_key = str(tuple(sorted((col1, col2))))
+                xi_corr_val = features_values_checked[pair_key] # 이미 계산된 값을 사용
+                
+                if xi_corr_val > threshold:
+                    # 여기서는 간단하게 col2를 드롭하도록 구현합니다.
+                    to_drop.append(col2)
+                    features_dropped_yn[col2] = True
+        
+        X_filtered = X.drop(columns=to_drop, axis=1)
+    else:
+        X_filtered = X
+        
+    end_time = dt.datetime.now()
+    duration = end_time - start_time
+    duration_str = str(duration).split('.')[0]
+    
+    stats = {
+        'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'end_time': end_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'duration': duration_str,
+        'threshold_value': threshold,
+        'original_count': X.shape[1],
+        'remaining_count': X_filtered.shape[1],
+        'features_dropped_yn': features_dropped_yn,
+        'features_values_checked': features_values_checked
+    }
+    
+    print(f"    - 피처 간 비선형 상관관계 필터링 후 남은 피처 수: {stats['remaining_count']}")
+    return X_filtered, stats
 
 # --- 통합 필터링 워크플로 함수명 변경 ---
 def feature_filter(X: pd.DataFrame, y: pd.Series, params: Dict) -> Tuple[pd.DataFrame, list, Dict]:

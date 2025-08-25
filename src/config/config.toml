@@ -398,22 +398,22 @@ change_threshold_random_forest = [ "task_create_results_random_forest:SECTION", 
 change_threshold_xgboost = [ "task_create_results_xgboost:SECTION", "task_create_metrics_xgboost:SECTION", "create_metrics_on_train_xgboost:SECTION",]
 
 [DATA_NODE.feature_selector_params_FeatureFilter_default.default_data.filter_methods]
-apply_variance_filter = "True:bool"
+apply_variance_filter = "False:bool"
 var_threshold = "0.01:float"
-apply_target_linear_corr_filter = "True:bool"
+apply_target_linear_corr_filter = "False:bool"
 target_linear_corr_threshold = "0.05:float"
-apply_target_xicor_filter = "True:bool"
+apply_target_xicor_filter = "False:bool"
 target_xicor_threshold = "0.1:float"
-apply_feature_linear_corr_filter = "True:bool"
+apply_feature_linear_corr_filter = "False:bool"
 feature_linear_corr_threshold = "0.95:float"
-apply_feature_xicor_filter = "True:bool"
+apply_feature_xicor_filter = "False:bool"
 feature_xicor_threshold = "0.9:float"
 
 [DATA_NODE.feature_selector_params_SelectFromModel_default.default_data.model_based]
 threshold = "median"
 
 [DATA_NODE.feature_selector.default_data.filter_methods]
-apply_variance_filter = "True:bool"
+apply_variance_filter = "False:bool"
 var_threshold = "0.01:float"
 apply_target_linear_corr_filter = "False:bool"
 target_linear_corr_threshold = "0.05:float"
