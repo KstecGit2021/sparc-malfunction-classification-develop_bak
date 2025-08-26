@@ -9,3 +9,4 @@ shap          # For SHAP plots
 optuna
 imbalanced-learn
 ipywidgets
+lightgbm

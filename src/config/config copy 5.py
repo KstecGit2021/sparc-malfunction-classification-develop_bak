@@ -22,6 +22,47 @@ preprocessed_dataset_cfg = Config.configure_data_node(id="preprocessed_dataset")
 train_dataset_cfg = Config.configure_data_node(id="train_dataset")
 test_dataset_cfg = Config.configure_data_node(id="test_dataset")
 
+feature_selector_default_old = \
+{
+    "feature_selector_name": "CorrelationsClassifier",
+    "f2_scorer": {
+        "name": "fbeta_score",
+        "beta": 4,
+        "pos_label": 1
+    },
+    "variance_threshold_filter": {
+        "threshold": 0
+    },
+    "correlation_filter": {
+        # "threshold": 0.01
+        # "threshold": 0.02
+        # "threshold": 0.08
+        "threshold": 0.09
+    }
+}
+
+feature_selector_default_old2 = \
+{
+    "feature_selector_name": "CorrelationsClassifier_New",  # 피처 선택기 이름 정의 (식별용)
+    "filter_methods": {  # 모든 필터링 기법과 파라미터를 포함
+        "variance_threshold": {  # 분산 필터링 설정
+            "threshold": 0.0  # 분산이 이 값 이하인 피처 제거 (모든 값이 동일한 피처 포함)
+        },
+        "target_correlation_filter": {  # 타겟과의 선형 상관관계 필터링 설정
+            "threshold": 0.01  # 타겟과의 절대 상관관계가 이 값 미만인 피처 제거
+        },
+        "target_xicor_filter": {  # 타겟과의 비선형 상관관계 필터링 설정
+            "threshold": 0.05  # 타겟과의 Xi Cor 값이 이 값 미만인 피처 제거
+        },
+        "feature_correlation_filter": {  # 피처 간 선형 상관관계 필터링 설정
+            "threshold": 0.98  # 피처 간 절대 상관관계가 이 값 초과 시, 둘 중 하나 제거
+        },
+        "xicor_correlation_filter": {  # 피처 간 비선형 상관관계 필터링 설정
+            "threshold": 0.9  # 피처 간 Xi Cor 값이 이 값 초과 시, 둘 중 하나 제거
+        }
+    }
+}
+
 # Filter Method를 적용하는 경우 (FeatureFilter)
 feature_selector_params_FeatureFilter_default = {
     "feature_selector_name": "FeatureFilter",
