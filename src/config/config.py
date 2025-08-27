@@ -74,6 +74,7 @@ feature_selector_params_rfe_default = \
         "n_features_to_select": 15, # 선택할 피처의 수
         "step": 1, # 한 번에 제거할 피처의 수
         "estimator": feature_selector_params_estimator_LogisticRegression_default
+        # "estimator": feature_selector_params_estimator_RandomForestClassifier_default
     }
 }
 feature_selector_params_rfe_default_cfg = Config.configure_data_node(id="feature_selector_params_rfe_default", storage_type="json", default_data=feature_selector_params_rfe_default)

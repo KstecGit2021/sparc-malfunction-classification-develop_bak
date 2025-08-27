@@ -10,3 +10,4 @@ optuna
 imbalanced-learn
 ipywidgets
 lightgbm
+minepy

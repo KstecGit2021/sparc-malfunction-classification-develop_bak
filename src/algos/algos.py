@@ -553,7 +553,7 @@ def create_train_test_data(
 f2_rare_scorer = make_scorer(fbeta_score, beta=4, pos_label=1)
 
 # --- 새로운 비선형 상관관계 함수 (Xi Cor) ---
-def xicor(X, Y, ties=True):
+def xicor_old(X, Y, ties=True):
     random.seed(42)
     n = len(X)
     order = array([i[0] for i in sorted(enumerate(X), key=lambda x: x[1])])
@@ -569,6 +569,52 @@ def xicor(X, Y, ties=True):
         r = array([sum(y >= Y[order]) for y in Y[order]])
         return 1 - 3 * sum( abs(r[1:] - r[:n-1]) ) / (n**2 - 1)
 # --- 함수 끝 ---
+
+from typing import Literal, Tuple, Union
+
+import numpy as np
+import numpy.typing as npt
+from scipy import stats
+
+
+def xicor(
+    x: npt.ArrayLike,
+    y: npt.ArrayLike,
+    ties: Union[bool, Literal["auto"]] = "auto",
+) -> Tuple[float, float]:
+    x = np.asarray(x).flatten()
+    y = np.asarray(y).flatten()
+    n = len(y)
+
+    if len(x) != n:
+        raise IndexError(f"x, y length mismatch: {len(x)}, {len(y)}")
+
+    if ties == "auto":
+        ties = len(np.unique(y)) < n
+    elif not isinstance(ties, bool):
+        raise ValueError(
+            f'expected ties either "auto" or boolean, '
+            f"got {ties} ({type(ties)}) instead"
+        )
+
+    y = y[np.argsort(x)]
+    r = stats.rankdata(y, method="ordinal")
+    nominator = np.sum(np.abs(np.diff(r)))
+
+    if ties:
+        l = stats.rankdata(y, method="max")
+        denominator = 2 * np.sum(l * (n - l))
+        nominator *= n
+    else:
+        denominator = np.power(n, 2) - 1
+        nominator *= 3
+
+    statistic = 1 - nominator / denominator  # upper bound is (n - 2) / (n + 1)
+    p_value = stats.norm.sf(statistic, scale=2 / 5 / np.sqrt(n))
+
+    return statistic, p_value
+
+
 
 # --- 변수 필터링 w.상관도 단계별 모듈화 함수 ---
 def filter_by_variance(X: pd.DataFrame, var_threshold: float) -> Tuple[pd.DataFrame, Dict]:
@@ -663,7 +709,7 @@ def filter_by_target_xicor_correlation(X: pd.DataFrame, y: pd.Series, threshold:
         if pd.api.types.is_numeric_dtype(X[col]) or pd.api.types.is_bool_dtype(X[col]):
             try:
                 # xicor는 변환된 데이터(X_processed, y_processed)를 사용
-                xi_corr_val = xicor(X_processed[col].values, y_processed.values)
+                xi_corr_val, p_value = xicor(X_processed[col].values, y_processed.values)
                 is_dropped = abs(xi_corr_val) <= threshold
                 features_dropped_yn[col] = str(is_dropped)
                 features_values_checked[col] = xi_corr_val
@@ -846,6 +892,21 @@ def feature_filter(X: pd.DataFrame, y: pd.Series, params: Dict) -> Tuple[pd.Data
     return X_filtered, final_cols, filter_stats
 
 # --- 변수 필터링 w.모델 단계별 모듈화 함수 ---
+def _get_estimator_old(estimator_params: Dict) -> BaseEstimator:
+    """
+    주어진 파라미터 딕셔너리를 기반으로 Scikit-learn 추정기 객체를 생성합니다.
+    """
+    estimator_name = estimator_params.get("name")
+    params = estimator_params.get("params", {})
+    
+    if estimator_name == "LogisticRegression":
+        return LogisticRegression(random_state=42, n_jobs=-1, **params)
+    elif estimator_name == "RandomForestClassifier":
+        return RandomForestClassifier(random_state=42, n_jobs=-1, **params)
+    elif estimator_name == "LGBMClassifier":
+        return LGBMClassifier(random_state=42, n_jobs=-1, **params)
+    else:
+        raise ValueError(f"지원되지 않는 추정기(estimator): {estimator_name}")
 def _get_estimator(estimator_params: Dict) -> BaseEstimator:
     """
     주어진 파라미터 딕셔너리를 기반으로 Scikit-learn 추정기 객체를 생성합니다.
@@ -861,8 +922,23 @@ def _get_estimator(estimator_params: Dict) -> BaseEstimator:
         return LGBMClassifier(random_state=42, n_jobs=-1, **params)
     else:
         raise ValueError(f"지원되지 않는 추정기(estimator): {estimator_name}")
-def run_model_based_feature_selection(
-    X: pd.DataFrame, 
+# --- 변수 중요도 추출 헬퍼 함수 추가 ---
+def _get_feature_importances(estimator: BaseEstimator, feature_names: List[str]) -> Dict[str, float]:
+    """
+    추정기(estimator)에서 변수 중요도를 추출하는 헬퍼 함수
+    """
+    importances = {}
+    if hasattr(estimator, 'feature_importances_'):
+        importances = {col: imp for col, imp in zip(feature_names, estimator.feature_importances_)}
+    elif hasattr(estimator, 'coef_'):
+        # LogisticRegression과 같은 모델의 경우 coef_ 속성을 사용
+        coefs = estimator.coef_[0] if estimator.coef_.ndim > 1 else estimator.coef_
+        importances = {col: abs(coef) for col, coef in zip(feature_names, coefs)}
+    return importances
+
+
+def run_model_based_feature_selection_old(
+    X_in: pd.DataFrame, 
     y: pd.Series, 
     selector_name: str, 
     selector_params: Dict
@@ -880,6 +956,9 @@ def run_model_based_feature_selection(
         Tuple[List[str], Dict]: 선택된 피처 리스트와 통계 정보 딕셔너리
     """
     start_time = dt.datetime.now()
+    
+    X = X_in.copy()
+    
     initial_features = list(X.columns)
     
     estimator_params = selector_params.get("estimator")
@@ -890,6 +969,9 @@ def run_model_based_feature_selection(
     stats = {}
     
     if selector_name == 'RFE':
+        # The code snippet you provided is not valid Python code. It seems like there is a placeholder
+        # "initial_features" followed by some comment lines denoted by "
+        # initial_features = list(X[0].columns)
         n_features_to_select = selector_params.get('n_features_to_select')
         step = selector_params.get('step', 1)
         
@@ -947,6 +1029,126 @@ def run_model_based_feature_selection(
     print(f"남은 피처 수: {stats['remaining_count']}")
     
     return selected_features, stats
+def run_model_based_feature_selection(
+    X_in: pd.DataFrame, 
+    y: pd.Series, 
+    selector_name: str, 
+    selector_params: Dict
+) -> Tuple[List[str], Dict]:
+    """
+    **RFE, SFS, SelectFromModel을 선택적으로 실행하는 범용 함수입니다.**
+    
+    Args:
+        X (pd.DataFrame): 피처 데이터
+        y (pd.Series): 타겟 데이터
+        selector_name (str): 사용할 변수 선택기 이름 ('RFE', 'SFS', 'SFM')
+        selector_params (Dict): 변수 선택기에 전달할 파라미터 딕셔너리
+
+    Returns:
+        Tuple[List[str], Dict]: 선택된 피처 리스트와 통계 정보 딕셔너리
+    """
+    start_time = dt.datetime.now()
+    
+    X = X_in.copy()
+    
+    initial_features = list(X.columns)
+    
+    estimator_params = selector_params.get("estimator")
+    estimator = _get_estimator(estimator_params)
+    
+    selected_features = []
+    dropped_features = []
+    stats = {}
+    
+    if selector_name == 'RFE':
+        n_features_to_select = selector_params.get('n_features_to_select')
+        step = selector_params.get('step', 1)
+        
+        selector = RFE(estimator=estimator, n_features_to_select=n_features_to_select, step=step)
+        selector.fit(X, y)
+        selected_mask = selector.get_support()
+        selected_features = list(X.columns[selected_mask])
+        
+        # RFE는 순위를 제공. 랭킹을 stats에 추가
+        ranking = {col: rank for col, rank in zip(initial_features, selector.ranking_)}
+        stats = {'method': 'RFE', 'n_features_to_select': n_features_to_select, 'step': step, 'ranking': ranking}
+
+        # 선택된 피처의 중요도를 추출하여 stats에 추가
+        if ranking and any(rank == 1 for rank in ranking.values()):
+            selected_estimator = _get_estimator(estimator_params)
+            selected_estimator.fit(X[selected_features], y)
+            importances = _get_feature_importances(selected_estimator, selected_features)
+            stats['importances'] = importances
+            
+    elif selector_name == 'SFM':
+        threshold = selector_params.get('threshold', 'median')
+        
+        # 모델을 먼저 학습하고 SelectFromModel에 전달
+        estimator.fit(X, y)
+        selector = SelectFromModel(estimator, prefit=True, threshold=threshold)
+        selected_mask = selector.get_support()
+        selected_features = list(X.columns[selected_mask])
+
+        # 모델에서 변수 중요도 추출
+        importances = _get_feature_importances(estimator, initial_features)
+        stats = {'method': 'SFM', 'threshold': threshold, 'importances': importances}
+
+    elif selector_name == 'SFS':
+        n_features_to_select = selector_params.get('n_features_to_select')
+        direction = selector_params.get('direction', 'forward')
+        
+        selector = SFS(estimator=estimator, n_features_to_select=n_features_to_select, direction=direction, cv=5)
+        
+        selector.fit(X, y)
+        selected_features = list(X.columns[selector.get_support()])
+        
+        # SFS는 직접 중요도를 제공하지 않으므로, 선택된 변수로 모델을 다시 학습하여 중요도를 추출
+        selected_estimator = _get_estimator(estimator_params)
+        selected_estimator.fit(X[selected_features], y)
+        importances = _get_feature_importances(selected_estimator, selected_features)
+
+        stats = {
+            'method': 'SFS', 
+            'n_features_to_select': n_features_to_select, 
+            'direction': direction,
+            'importances': importances
+        }
+        
+    else:
+        raise ValueError(f"지원되지 않는 선택기(selector) 이름: {selector_name}. 'RFE', 'SFS', 'SFM' 중 선택하세요.")
+
+    dropped_features = [col for col in initial_features if col not in selected_features]
+
+    end_time = dt.datetime.now()
+    duration_str = str(end_time - start_time).split('.')[0]
+
+    stats.update({
+        'start_time': end_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'end_time': end_time.strftime('%Y-%m-%d %H:%M:%S'),
+        'duration': duration_str,
+        'original_count': len(initial_features),
+        'remaining_count': len(selected_features),
+        'selected_features': selected_features,
+        'dropped_features': dropped_features,
+    })
+    
+    print(f"--- {selector_name} 선택기 완료 ---")
+    print(f"남은 피처 수: {stats['remaining_count']}")
+    
+    return selected_features, stats
+
+# JSON 직렬화에 사용될 커스텀 클래스
+class NpEncoder(json.JSONEncoder):
+    """Numpy 타입(int64, float64 등)을 JSON으로 직렬화하기 위한 클래스"""
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NpEncoder, self).default(obj)
+
 
 # --- 변수 선택 함수 ---
 def select_feature_old(train_data: pd.DataFrame, feature_selector_params: Dict) -> Dict:
@@ -1047,7 +1249,7 @@ def select_feature_old(train_data: pd.DataFrame, feature_selector_params: Dict) 
     
     print(f"\n- 최종 피처 수: {final_feature_count}")
     return feature_selection_info
-def select_feature(train_data: pd.DataFrame, feature_selector_params: Dict) -> Dict:
+def select_feature_old2(train_data: pd.DataFrame, feature_selector_params: Dict) -> Dict:
     """
     피처 선택 워크플로를 수행하고 결과를 딕셔너리로 반환합니다.
     """
@@ -1073,8 +1275,10 @@ def select_feature(train_data: pd.DataFrame, feature_selector_params: Dict) -> D
                 raise KeyError(f"설정(configuration)에 '{selector_name.lower()}_params'가 누락되었습니다.")
             
             final_features, stats = run_model_based_feature_selection(
-                X=X_train,
-                y=y_train,
+                # X=X_train,
+                # y=y_train,
+                X_train,
+                y_train,
                 selector_name=selector_name,
                 selector_params=selector_params
             )
@@ -1110,6 +1314,74 @@ def select_feature(train_data: pd.DataFrame, feature_selector_params: Dict) -> D
     feature_selection_info['feature_selection_info_json_path'] = file_path
     
     return feature_selection_info
+def select_feature(train_data: pd.DataFrame, feature_selector_params: Dict) -> Dict:
+    """
+    피처 선택 워크플로를 수행하고 결과를 딕셔너리로 반환합니다.
+    """
+    X_train = train_data.iloc[:, :-1]
+    y_train = train_data.iloc[:, -1]
+    feature_selection_info={}
+    feature_selection_info = feature_selector_params.copy()
+    initial_feature_count = X_train.shape[1]
+    
+    selector_name = feature_selector_params.get("feature_selector_name")
+    final_features = list(X_train.columns)
+    stats = {}
+    
+    print(f"\n--- 피처 선택기: {selector_name} ---")
+
+    try:
+        if selector_name == 'FeatureFilter':
+            filter_params = feature_selector_params['filter_methods']
+            _, final_features, stats = feature_filter(X=X_train, y=y_train, params=filter_params)
+        
+        elif selector_name in ['RFE', 'SFM', 'SFS']:
+            selector_params = feature_selector_params.get(f"{selector_name.lower()}_params")
+            if not selector_params:
+                raise KeyError(f"설정(configuration)에 '{selector_name.lower()}_params'가 누락되었습니다.")
+            
+            final_features, stats = run_model_based_feature_selection(
+                X_train,
+                y_train,
+                selector_name=selector_name,
+                selector_params=selector_params
+            )
+        else:
+            print("\n--- 피처 선택기: No-op ---")
+            stats = {'method': 'No-op', 'original_count': initial_feature_count, 'remaining_count': initial_feature_count, 'selected_features': final_features, 'dropped_features': []}
+    
+    except Exception as e:
+        print(f"피처 선택 중 오류가 발생했습니다: {e}")
+        # 오류 발생 시 원본 피처를 반환
+        stats = {'method': 'Error', 'original_count': initial_feature_count, 'remaining_count': initial_feature_count, 'selected_features': final_features, 'dropped_features': [], 'error_message': str(e)}
+
+    final_feature_count = len(final_features)
+    feature_selection_info['initial_feature_count'] = initial_feature_count
+    feature_selection_info['final_feature_count'] = final_feature_count
+    feature_selection_info['final_features'] = final_features
+    feature_selection_info['selection_details'] = stats
+
+    # (저장 로직 수정)
+    destination_dir = 'data/result/jsons'
+    os.makedirs(destination_dir, exist_ok=True)
+    current_time = dt.datetime.now()
+    file_id = uuid.uuid4().hex[:8]
+    filename = "feature_selection_info_" + current_time.strftime('%y%m%d_%H%M%S') + f'_{file_id}.json'
+    file_path = os.path.join(destination_dir, filename)
+
+    with open(file_path, 'w', encoding='utf-8') as f:
+        # 클래스 인코더를 사용하여 numpy int64를 파이썬 int로 변환
+        json.dump(feature_selection_info, f, indent=4, ensure_ascii=False, cls=NpEncoder)
+
+    print(f"\n피처 선택 결과가 '{file_path}' 파일에 저장되었습니다.")
+    print(f"\n- 최종 피처 수: {final_feature_count}")
+    
+    feature_selection_info['feature_selection_info_json_path'] = file_path
+    
+    return feature_selection_info
+
+
+
 
 
 ##############################################################################################################################
