@@ -1336,7 +1336,8 @@ def select_feature(train_data: pd.DataFrame, feature_selector_params: Dict) -> D
             _, final_features, stats = feature_filter(X=X_train, y=y_train, params=filter_params)
         
         elif selector_name in ['RFE', 'SFM', 'SFS']:
-            selector_params = feature_selector_params.get(f"{selector_name.lower()}_params")
+            # selector_params = feature_selector_params.get(f"{selector_name.lower()}_params")
+            selector_params = feature_selector_params.get("params")
             if not selector_params:
                 raise KeyError(f"설정(configuration)에 '{selector_name.lower()}_params'가 누락되었습니다.")
             
@@ -1648,7 +1649,8 @@ def train_model_rf_cv(train_dataset: pd.DataFrame, feature_selection_info: dict,
         }
 
     # 클래스 불균형 문제를 해결하기 위해 클래스 가중치 부여
-    n_neg = len(y) - sum(y)
+    # n_neg = len(y) - sum(y)
+    n_neg = len(y) - sum(int(i) for i in y)
 
     # 값이 None이거나 딕셔너리에 키가 없으면 n_neg로 설정
     if train_parameters.get('class_weight_multiplier') == '':

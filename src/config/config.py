@@ -70,12 +70,14 @@ feature_selector_params_estimator_LGBMClassifier_default = \
 feature_selector_params_rfe_default = \
 {
     "feature_selector_name": "RFE",
-    "rfe_params": {
+    # "rfe_params": {
+    "params": {
         "n_features_to_select": 15, # 선택할 피처의 수
         "step": 1, # 한 번에 제거할 피처의 수
         "estimator": feature_selector_params_estimator_LogisticRegression_default
         # "estimator": feature_selector_params_estimator_RandomForestClassifier_default
-    }
+    },
+    "filter_methods": "apply_RecursiveFeatureElimination_filter"
 }
 feature_selector_params_rfe_default_cfg = Config.configure_data_node(id="feature_selector_params_rfe_default", storage_type="json", default_data=feature_selector_params_rfe_default)
 
@@ -83,12 +85,14 @@ feature_selector_params_rfe_default_cfg = Config.configure_data_node(id="feature
 feature_selector_params_sfs_default = \
 {
     "feature_selector_name": "SFS",
-    "sfs_params": {
+    # "sfs_params": {
+    "params": {
         "n_features_to_select": "auto", # 선택할 피처의 수 (자동)
         "direction": "forward", # 전진 선택 ('forward') 또는 후진 제거 ('backward')
         "scoring": "accuracy", # 모델 성능 평가 지표
         "estimator": feature_selector_params_estimator_RandomForestClassifier_default
-    }
+    },
+    "filter_methods": "apply_SequentialFeatureSelector_filter"
 }
 feature_selector_params_sfs_default_cfg = Config.configure_data_node(id="feature_selector_params_sfs_default", storage_type="json", default_data=feature_selector_params_sfs_default)
 
@@ -96,11 +100,13 @@ feature_selector_params_sfs_default_cfg = Config.configure_data_node(id="feature
 feature_selector_params_sfm_default = \
 {
     "feature_selector_name": "SFM",
-    "sfm_params": {
+    # "sfm_params": {
+    "params": {
         "threshold": "median", # 피처 중요도 임계값
         # "estimator": feature_selector_params_estimator_LGBMClassifier_default
         "estimator": feature_selector_params_estimator_RandomForestClassifier_default
-    }
+    },
+    "filter_methods": "apply_SelectFromModel_filter"
 }
 
 # # Embedded Method (SelectFromModel)를 적용하는 경우
@@ -171,9 +177,9 @@ split_parameter_default = \
         'sampling_ratio': None,
         
         'apply_feature_generation': False,
-        'sum_features': True,  # 쌍별 합 피처 생성 여부
-        'diff_features': True,  # 쌍별 차 피처 생성 여부
-        'poly_features': True,  # 다항식 피처 생성 여부
+        'sum_features': False,  # 쌍별 합 피처 생성 여부
+        'diff_features': False,  # 쌍별 차 피처 생성 여부
+        'poly_features': False,  # 다항식 피처 생성 여부
         'poly_degree': 2,
 
         # feature_generator 내부에서 적용되는 필터
