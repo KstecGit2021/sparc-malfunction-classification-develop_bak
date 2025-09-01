@@ -35,7 +35,7 @@ from numpy import array, random, arange
 import datetime as dt                                       # 날짜와 시간을 다루는 라이브러리
 import json                                                 # JSON 형식의 데이터를 처리하는 라이브러리
 import pprint
-from imblearn.over_sampling import SMOTE
+from imblearn.over_sampling import SMOTE, RandomOverSampler, ADASYN
 from imblearn.under_sampling import RandomUnderSampler
 from collections import Counter
 
@@ -380,7 +380,7 @@ def feature_generator(X, sum_features=False, diff_features=False, poly_features=
 ##############################################################################################################################
 
 # 훈련 및 테스트 데이터셋을 생성하는 함수
-def create_train_test_data(
+def create_train_test_data_old(
     preprocessed_dataset: pd.DataFrame,
     split_parameter: dict = None
 ):
@@ -539,6 +539,214 @@ def create_train_test_data(
     split_parameter_info['final_train_feature_count'] = train_data.shape[1] - 1
     
     return train_data, test_data, split_parameter_info
+
+def create_train_test_data(
+    preprocessed_dataset: pd.DataFrame,
+    split_parameter: dict = None
+):
+    """
+    훈련/테스트 데이터 분할 및 샘플링을 적용하는 함수.
+    Feature Generation 적용 여부 및 옵션을 split_parameter에서 제어합니다.
+    split_parameter_info에 처리 결과 정보를 세부적으로 추가합니다.
+    """
+    print("\n\n##############################################################################################################################")
+    print("# 3) Create Train/Test Split (훈련/테스트 데이터 분할) ")
+    print("##############################################################################################################################")
+    
+    print("\n     훈련 및 테스트 데이터셋 생성 중...")
+
+    # split_parameter의 기본값 설정 및 업데이트
+    default_params = {
+        'test_size': 0.2,
+        'random_state': 42,
+        'sampling_method': None,  # Add sampling_method parameter
+        'sampling_ratio': None,
+        'apply_feature_generation': False,
+        'sum_features': False,
+        'diff_features': False,
+        'poly_features': False,
+        'poly_degree': 2,
+        'apply_filter_split': False,
+        'var_threshold_split': 0.0,
+        'corr_threshold_split': 0.98,
+        'apply_filter_gen': False,
+        'var_threshold_gen': 0.0,
+        'corr_threshold_gen': 0.98,
+    }
+    
+    if split_parameter:
+        default_params.update(split_parameter)
+    split_parameter = default_params
+
+    split_parameter_info = split_parameter.copy()
+    
+    # ----------------------------------------------------
+    # Step 1: 아웃라이어 제거
+    # ----------------------------------------------------
+    initial_dataset_shape = preprocessed_dataset.shape
+    # Check for 'Radius' and 'Pass/Fail' columns before applying mask to avoid KeyError
+    if "Radius" in preprocessed_dataset.columns and "Pass/Fail" in preprocessed_dataset.columns:
+      outlier_mask = (preprocessed_dataset["Radius"] < 32) & (preprocessed_dataset["Pass/Fail"])
+      preprocessed_dataset = preprocessed_dataset[~outlier_mask].reset_index(drop=True)
+      split_parameter_info['rows_after_outlier_removal'] = preprocessed_dataset.shape[0]
+    else:
+      print("Warning: 'Radius' or 'Pass/Fail' column not found. Skipping outlier removal.")
+      split_parameter_info['rows_after_outlier_removal'] = initial_dataset_shape[0]
+
+    X = preprocessed_dataset.iloc[:, :-1]
+    y = preprocessed_dataset.iloc[:, -1]
+    
+    # ----------------------------------------------------
+    # Step 2: 분할 전 필터링 적용
+    # ----------------------------------------------------
+    split_parameter_info['features_before_split_filter'] = X.shape[1]
+    if split_parameter['apply_filter_split']:
+        print(f"     - 분할 전 필터링 적용 (분산: {split_parameter['var_threshold_split']}, 상관관계: {split_parameter['corr_threshold_split']})")
+        # Assuming variance_correlation_filter is defined elsewhere
+        X, _, var_dropped, corr_dropped = filter_by_variance(X, split_parameter['var_threshold_split'])
+        split_parameter_info['features_after_split_filter'] = X.shape[1]
+        split_parameter_info['features_dropped_by_variance_split'] = var_dropped
+        split_parameter_info['features_dropped_by_correlation_split'] = corr_dropped
+    else:
+        print("     - 분할 전 필터링 미적용.")
+        split_parameter_info['features_after_split_filter'] = X.shape[1]
+        split_parameter_info['features_dropped_by_variance_split'] = 0
+        split_parameter_info['features_dropped_by_correlation_split'] = 0
+        
+    # ----------------------------------------------------
+    # Step 3: Feature Generation 적용
+    # ----------------------------------------------------
+    split_parameter_info['original_feature_count'] = X.shape[1]
+    if split_parameter['apply_feature_generation']:
+        print("     - Feature Generation 적용...")
+        X, gen_counts = feature_generator(
+            X, 
+            sum_features=split_parameter['sum_features'],
+            diff_features=split_parameter['diff_features'],
+            poly_features=split_parameter['poly_features'],
+            poly_degree=split_parameter['poly_degree'],
+            apply_filter_gen=split_parameter['apply_filter_gen'],
+            var_threshold_gen=split_parameter['var_threshold_gen'],
+            corr_threshold_gen=split_parameter['corr_threshold_gen']
+        )
+        split_parameter_info['generated_feature_counts'] = gen_counts
+        split_parameter_info['total_generated_features'] = sum(gen_counts.values())
+        split_parameter_info['features_after_generation'] = X.shape[1]
+        
+        generation_types = []
+        if split_parameter['sum_features']: generation_types.append('sum')
+        if split_parameter['diff_features']: generation_types.append('diff')
+        if split_parameter['poly_features']: generation_types.append('poly')
+        split_parameter_info['generation_types_applied'] = generation_types
+        
+        print("     - Feature Generation 완료. 새로운 피쳐 수:", split_parameter_info['total_generated_features'])
+    else:
+        print("     - Feature Generation 미적용.")
+        split_parameter_info['generated_feature_counts'] = {'sum': 0, 'diff': 0, 'poly': 0}
+        split_parameter_info['total_generated_features'] = 0
+        split_parameter_info['features_after_generation'] = X.shape[1]
+
+    # ----------------------------------------------------
+    # Step 4: 훈련/테스트 데이터 분할
+    # ----------------------------------------------------
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, 
+        test_size=split_parameter['test_size'], 
+        random_state=split_parameter['random_state'], 
+        stratify=y
+    )
+    
+    split_parameter_info['train_samples_before_sampling'] = len(X_train)
+    split_parameter_info['test_samples'] = len(X_test)
+    
+    train_class_distribution_before = dict(sorted(Counter(y_train).items()))
+    split_parameter_info['class_distribution_before_sampling'] = train_class_distribution_before
+    print(f"\n     - 분할 전 훈련 데이터 클래스 분포: {train_class_distribution_before}")
+
+    # ----------------------------------------------------
+    # Step 5: 샘플링 적용 (오버샘플링/언더샘플링)
+    # ----------------------------------------------------
+    sampling_method = split_parameter['sampling_method']
+    sampling_ratio = split_parameter['sampling_ratio']
+    
+    split_parameter_info['sampling_method_used'] = sampling_method
+    split_parameter_info['sampling_ratio_used'] = sampling_ratio
+    
+    sampler = None
+    if sampling_method == 'SMOTE':
+        if sampling_ratio is None:
+            sampling_strategy = 'auto'
+        elif sampling_ratio >= 1:
+            n_samples_majority = sum(y_train == 0)
+            target_minority_count = int(n_samples_majority * sampling_ratio)
+            sampling_strategy = {1: target_minority_count}
+        else:
+            print("Warning: SMOTE is an oversampling method. For a sampling_ratio < 1, you might want to use RandomUnderSampler or a different method.")
+            sampling_strategy = 'auto' # Fallback to auto
+        sampler = SMOTE(sampling_strategy=sampling_strategy, random_state=split_parameter['random_state'])
+        print(f"     - SMOTE 오버샘플링 적용 (sampling_ratio: {sampling_ratio})")
+    elif sampling_method == 'ROS':
+        if sampling_ratio is None:
+            sampling_strategy = 'auto'
+        elif sampling_ratio >= 1:
+            n_samples_majority = sum(y_train == 0)
+            target_minority_count = int(n_samples_majority * sampling_ratio)
+            sampling_strategy = {1: target_minority_count}
+        else:
+            print("Warning: RandomOverSampler is an oversampling method. For a sampling_ratio < 1, you might want to use RandomUnderSampler or a different method.")
+            sampling_strategy = 'auto' # Fallback to auto
+        sampler = RandomOverSampler(sampling_strategy=sampling_strategy, random_state=split_parameter['random_state'])
+        print(f"     - ROS(RandomOverSampler) 오버샘플링 적용 (sampling_ratio: {sampling_ratio})")
+    elif sampling_method == 'ADASYN':
+        if sampling_ratio is None:
+            sampling_strategy = 'auto'
+        elif sampling_ratio >= 1:
+            n_samples_majority = sum(y_train == 0)
+            target_minority_count = int(n_samples_majority * sampling_ratio)
+            sampling_strategy = {1: target_minority_count}
+        else:
+            print("Warning: ADASYN is an oversampling method. For a sampling_ratio < 1, you might want to use RandomUnderSampler or a different method.")
+            sampling_strategy = 'auto' # Fallback to auto
+        sampler = ADASYN(sampling_strategy=sampling_strategy, random_state=split_parameter['random_state'])
+        print(f"     - ADASYN 오버샘플링 적용 (sampling_ratio: {sampling_ratio})")
+    elif sampling_method == 'RandomUnderSampler':
+        if sampling_ratio is not None and sampling_ratio < 1:
+            n_samples_minority = sum(y_train == 1)
+            target_majority_count = int(n_samples_minority / sampling_ratio)
+            sampling_strategy = {0: target_majority_count}
+        else:
+            print("Warning: RandomUnderSampler is an undersampling method. The sampling_ratio should be < 1. Using 'auto' strategy.")
+            sampling_strategy = 'auto'
+        sampler = RandomUnderSampler(sampling_strategy=sampling_strategy, random_state=split_parameter['random_state'])
+        print(f"     - RandomUnderSampler 적용 (sampling_ratio: {sampling_ratio})")
+    elif sampling_method is None or sampling_method.lower() == 'none':
+        print("     - 샘플링 미적용")
+        split_parameter_info['sampling_applied'] = 'None'
+    else:
+        print(f"Warning: Unknown sampling method '{sampling_method}'. No sampling will be applied.")
+        split_parameter_info['sampling_applied'] = 'None'
+
+    if sampler is not None:
+        X_train, y_train = sampler.fit_resample(X_train, y_train)
+        train_class_distribution_after = dict(sorted(Counter(y_train).items()))
+        split_parameter_info['class_distribution_after_sampling'] = train_class_distribution_after
+        split_parameter_info['train_samples_after_sampling'] = len(X_train)
+        print(f"     - 샘플링 적용 후 훈련 데이터 클래스 분포: {train_class_distribution_after}")
+        split_parameter_info['sampling_applied'] = sampling_method
+    else:
+        split_parameter_info['sampling_applied'] = 'None'
+        split_parameter_info['train_samples_after_sampling'] = len(X_train)
+
+    # ----------------------------------------------------
+    # Step 6: 최종 데이터프레임 병합 및 반환
+    # ----------------------------------------------------
+    train_data = pd.concat([X_train, y_train], axis=1)
+    test_data = pd.concat([X_test, y_test], axis=1)
+    
+    split_parameter_info['final_train_feature_count'] = train_data.shape[1] - 1
+    
+    return train_data, test_data, split_parameter_info
+
 
 ##############################################################################################################################
 # 4) Custom F2 scorer with pos_label=1 (since 1 = fail/rare)
@@ -2331,7 +2539,8 @@ def forecast(test_dataset: pd.DataFrame, trained_model, feature_selection_info: 
     
     # 기준 모델이 아닌 경우에만 SHAP 값을 계산합니다.
     if not isinstance(trained_model, BaselineModel):
-        shap_values = explainer(X)
+        # shap_values = explainer(X)
+        shap_values = explainer(X, check_additivity=False) 
         # (주석 처리된 코드) SHAP 요약 플롯을 그립니다.
         # plt.figure(figsize=(10, 5))
         # shap.summary_plot(shap_values, X, max_display=10, show=False)

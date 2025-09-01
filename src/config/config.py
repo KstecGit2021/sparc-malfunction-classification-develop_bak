@@ -174,6 +174,7 @@ split_parameter_default = \
         'var_threshold_split': 0.0,
         'corr_threshold_split': 0.98,
         
+        'sampling_method': None,  # Add sampling_method parameter. None, 'ROS', 'ADASYN', 'SMOTE', 'RandomUnderSampler'
         'sampling_ratio': None,
         
         'apply_feature_generation': False,

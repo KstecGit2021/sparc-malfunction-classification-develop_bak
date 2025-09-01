@@ -10,4 +10,5 @@ optuna
 imbalanced-learn
 ipywidgets
 lightgbm
-minepy
+#minepy
+seaborn
