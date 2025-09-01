@@ -1,0 +1,2 @@
+Rem robocopy "원본 경로" "대상 경로" /E
+robocopy "c:\Users\boksu.oh\Documents\GitHub\sparc-malfunction-classification-develop\src" "c:\Users\boksu.oh\Documents\GitHub\sparc-malfunction-classification-develop_bak\src" /E /XD ".taipy" ".tmp" ".venv" "__pycache__" "data" "user_data" ".conda"

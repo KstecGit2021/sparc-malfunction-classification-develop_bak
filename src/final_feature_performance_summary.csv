@@ -1,5 +1,2 @@
 fn,fp,tn,tp,feature_selector_name,initial_feature_count,final_feature_count,f2_score,importance_column,best_k_percentile
-14,7,703,0,FeatureFilter_variance,1650,1320,0.0,FeatureFilter_variance,0.8
-14,7,703,0,FeatureFilter_target_linear_correlation,1650,165,0.0,FeatureFilter_target_linear_correlation,0.1
-14,7,703,0,FeatureFilter_target_xicor_correlation,1650,1485,0.0,FeatureFilter_target_xicor_correlation,0.9
-14,6,704,0,SFM_importances,1650,825,0.0,SFM_importances,0.5
+14,6,704,0,FeatureFilter_variance,1650,1238,0.0,FeatureFilter_variance,0.75
