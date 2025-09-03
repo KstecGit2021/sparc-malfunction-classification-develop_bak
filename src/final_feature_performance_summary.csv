@@ -1,2 +1,0 @@
-fn,fp,tn,tp,feature_selector_name,initial_feature_count,final_feature_count,f2_score,importance_column,best_k_percentile
-14,6,704,0,FeatureFilter_variance,1650,1238,0.0,FeatureFilter_variance,0.75

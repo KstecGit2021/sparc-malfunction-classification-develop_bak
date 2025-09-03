@@ -1,0 +1,3 @@
+pip freeze > uninstalled_packages.txt
+pip uninstall -r uninstalled_packages.txt -y
+pip install -r requirements.txt
